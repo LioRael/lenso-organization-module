@@ -10,7 +10,8 @@ use platform_http::ApiOpenApiRouter;
 use platform_module::{
     AdminAction, AdminActionDangerLevel, AdminActionInputField, AdminActionInputSchema,
     AdminDeclarativeComponent, AdminDeclarativePage, AdminDeclarativeSection,
-    AdminDeclarativeSurface, AdminSchema, EntitySchema, FieldSchema, FieldType, HostLinkedModule,
+    AdminDeclarativeSurface, AdminSchema, ConsoleArea, ConsoleNavigation, ConsolePackage,
+    ConsoleSurface, ConsoleWorkspaceRef, EntitySchema, FieldSchema, FieldType, HostLinkedModule,
     LinkedBinding, LinkedHttpContribution, Module, ModuleHttpMethod, ModuleHttpRoute,
     ModuleManifest,
 };
@@ -18,6 +19,8 @@ use std::sync::Arc;
 
 pub const MODULE_NAME: &str = "organization";
 pub const AUTH_MODULE_DEPENDENCY: &str = "auth";
+pub const ORGANIZATION_CONSOLE_PACKAGE: &str = "@lenso/organization-console";
+pub const ORGANIZATION_CONSOLE_EXPORT: &str = "organizationConsoleModule";
 pub const ORGANIZATION_READ: &str = "organization.read";
 pub const ORGANIZATION_MANAGE: &str = "organization.manage";
 pub const ORGANIZATION_MEMBERS_MANAGE: &str = "organization.members.manage";
@@ -186,12 +189,85 @@ pub fn admin_surface() -> AdminDeclarativeSurface {
     }
 }
 
+fn organization_workspace() -> ConsoleWorkspaceRef {
+    ConsoleWorkspaceRef {
+        id: "organization".to_owned(),
+        label: "Organization".to_owned(),
+        icon: Some("boxes".to_owned()),
+    }
+}
+
+pub fn console_surfaces() -> Vec<ConsoleSurface> {
+    vec![
+        console_surface(
+            "organizations",
+            "Organizations",
+            "/data/organization",
+            "boxes",
+            ORGANIZATION_READ,
+            70,
+        ),
+        console_surface(
+            "members",
+            "Members",
+            "/data/organization/members",
+            "users",
+            ORGANIZATION_MEMBERS_MANAGE,
+            80,
+        ),
+        console_surface(
+            "roles",
+            "Roles",
+            "/data/organization/roles",
+            "shield",
+            ORGANIZATION_ROLES_MANAGE,
+            90,
+        ),
+        console_surface(
+            "invitations",
+            "Invitations",
+            "/data/organization/invitations",
+            "key-round",
+            ORGANIZATION_INVITATIONS_MANAGE,
+            100,
+        ),
+    ]
+}
+
+fn console_surface(
+    name: &str,
+    label: &str,
+    route: &str,
+    icon: &str,
+    capability: &str,
+    order: i32,
+) -> ConsoleSurface {
+    ConsoleSurface {
+        name: name.to_owned(),
+        label: label.to_owned(),
+        area: ConsoleArea::Data,
+        route: route.to_owned(),
+        package: ConsolePackage {
+            name: ORGANIZATION_CONSOLE_PACKAGE.to_owned(),
+            export: ORGANIZATION_CONSOLE_EXPORT.to_owned(),
+        },
+        icon: Some(icon.to_owned()),
+        required_capabilities: vec![capability.to_owned()],
+        navigation: Some(ConsoleNavigation {
+            workspace: organization_workspace(),
+            group: None,
+            order: Some(order),
+        }),
+    }
+}
+
 pub fn manifest() -> ModuleManifest {
     ModuleManifest::builder(MODULE_NAME)
         .dependencies(vec![AUTH_MODULE_DEPENDENCY.to_owned()])
         .capabilities(capabilities())
         .http_routes(http_routes())
         .declarative_admin(admin_surface())
+        .console(console_surfaces())
         .build()
 }
 
@@ -447,6 +523,7 @@ mod tests {
             manifest.admin,
             Some(AdminSurface::DeclarativeCustom(admin_surface()))
         );
+        assert_eq!(manifest.console, console_surfaces());
 
         let lints = platform_module::lint_module_manifest(ModuleSource::Linked, &manifest);
         assert!(
@@ -455,6 +532,78 @@ mod tests {
                 .all(|lint| lint.severity == ModuleManifestLintSeverity::Ok),
             "organization manifest should not have warning/error lints: {lints:?}"
         );
+    }
+
+    #[test]
+    fn manifest_declares_console_surfaces() {
+        let manifest = manifest();
+
+        assert_eq!(manifest.console.len(), 4);
+        assert_console_surface(
+            &manifest.console[0],
+            "organizations",
+            "Organizations",
+            "/data/organization",
+            "boxes",
+            ORGANIZATION_READ,
+            70,
+        );
+        assert_console_surface(
+            &manifest.console[1],
+            "members",
+            "Members",
+            "/data/organization/members",
+            "users",
+            ORGANIZATION_MEMBERS_MANAGE,
+            80,
+        );
+        assert_console_surface(
+            &manifest.console[2],
+            "roles",
+            "Roles",
+            "/data/organization/roles",
+            "shield",
+            ORGANIZATION_ROLES_MANAGE,
+            90,
+        );
+        assert_console_surface(
+            &manifest.console[3],
+            "invitations",
+            "Invitations",
+            "/data/organization/invitations",
+            "key-round",
+            ORGANIZATION_INVITATIONS_MANAGE,
+            100,
+        );
+    }
+
+    fn assert_console_surface(
+        surface: &ConsoleSurface,
+        name: &str,
+        label: &str,
+        route: &str,
+        icon: &str,
+        capability: &str,
+        order: i32,
+    ) {
+        assert_eq!(surface.name, name);
+        assert_eq!(surface.label, label);
+        assert_eq!(surface.area, ConsoleArea::Data);
+        assert_eq!(surface.route, route);
+        assert_eq!(surface.icon.as_deref(), Some(icon));
+        assert_eq!(surface.package.name, "@lenso/organization-console");
+        assert_eq!(surface.package.export, "organizationConsoleModule");
+        assert_eq!(surface.required_capabilities, vec![capability.to_owned()]);
+
+        let navigation = surface
+            .navigation
+            .as_ref()
+            .expect("console surface should declare navigation");
+        assert_eq!(navigation.workspace.id, "organization");
+        assert_eq!(navigation.workspace.label, "Organization");
+        assert_eq!(navigation.workspace.icon.as_deref(), Some("boxes"));
+        assert_eq!(navigation.group, None);
+        assert_eq!(navigation.order, Some(order));
     }
 
     #[test]
