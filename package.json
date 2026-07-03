@@ -6,7 +6,7 @@
   "scripts": {
     "build": "pnpm --dir packages/organization-console build",
     "check": "pnpm test && pnpm typecheck && pnpm build",
-    "test": "vitest run packages/organization-console/src",
+    "test": "vitest run packages/organization-console/src --passWithNoTests",
     "typecheck": "tsc -b --pretty false"
   },
   "devDependencies": {

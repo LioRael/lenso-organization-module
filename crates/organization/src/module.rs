@@ -548,7 +548,10 @@ mod tests {
             manifest.console[0].package.name,
             "@lenso/organization-console"
         );
-        assert_eq!(manifest.console[0].package.export, "organizationConsoleModule");
+        assert_eq!(
+            manifest.console[0].package.export,
+            "organizationConsoleModule"
+        );
     }
 
     #[test]
