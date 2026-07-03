@@ -186,11 +186,17 @@ export function OrganizationConsolePage() {
     });
   };
 
+  const handleSelectOrganization = (id: string) => {
+    setSelectedOrganizationId(id);
+    setLastToken(null);
+  };
+
   const handleCreateInvitation = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (displayedOrganizationId === null) {
       return;
     }
+    setLastToken(null);
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     invokeOrganizationAction(
@@ -205,10 +211,7 @@ export function OrganizationConsolePage() {
       },
       {
         onSuccess: (response) => {
-          const token = invitationTokenFromResponse(response.data);
-          if (token !== null) {
-            setLastToken(token);
-          }
+          setLastToken(invitationTokenFromResponse(response.data));
         },
       }
     );
@@ -283,7 +286,7 @@ export function OrganizationConsolePage() {
           action={action}
           onArchiveSelected={handleArchiveSelected}
           onCreateOrganization={handleCreateOrganization}
-          onSelect={setSelectedOrganizationId}
+          onSelect={handleSelectOrganization}
           organizations={organizations}
           selectedOrganization={selectedOrganization}
           selectedOrganizationId={displayedOrganizationId}
