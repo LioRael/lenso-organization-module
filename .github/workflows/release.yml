@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_npm:
+        description: Publish Runtime Console npm packages
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - name: Checkout organization module
+        uses: actions/checkout@v6
+        with:
+          path: lenso-organization-module
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Ensure npm supports trusted publishing
+        run: |
+          npm install --global npm@^11.5.1
+          npm --version
+
+      - name: Setup pnpm
+        run: corepack enable
+
+      - name: Install npm dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: lenso-organization-module
+
+      - name: Verify
+        run: |
+          cargo fmt --all --check
+          cargo test --locked -p lenso-module-organization
+          pnpm check
+        working-directory: lenso-organization-module
+
+      - name: Verify npm package
+        run: npm pack --dry-run --registry https://registry.npmjs.org/
+        working-directory: lenso-organization-module/packages/organization-console
+
+      - name: Publish organization console with trusted publishing
+        if: ${{ inputs.publish_npm }}
+        run: |
+          set -eu
+          package_name="$(node -p "require('./package.json').name")"
+          package_version="$(node -p "require('./package.json').version")"
+
+          if npm view "$package_name@$package_version" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then
+            echo "$package_name@$package_version is already on npm; skipping."
+            exit 0
+          fi
+
+          npm publish --access public --registry https://registry.npmjs.org/
+        working-directory: lenso-organization-module/packages/organization-console
