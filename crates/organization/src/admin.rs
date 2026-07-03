@@ -1,10 +1,16 @@
-use crate::repositories::PostgresOrganizationRepository;
+use crate::repositories::{PostgresOrganizationRepository, organization_to_value, role_to_value};
+use auth::public::AuthUserId;
 use chrono::{DateTime, Utc};
 use platform_core::{AppError, AppResult, ErrorCode};
 use platform_module::{AdminActionSource, AdminDataSource, AdminListQuery, AdminPage};
 use serde_json::Value;
+use std::collections::HashSet;
 use std::sync::Arc;
 
+pub const CREATE_ORGANIZATION_ACTION: &str = "create_organization";
+pub const ARCHIVE_ORGANIZATION_ACTION: &str = "archive_organization";
+pub const CREATE_ROLE_ACTION: &str = "create_role";
+pub const UPDATE_ROLE_PERMISSIONS_ACTION: &str = "update_role_permissions";
 pub const CREATE_INVITATION_ACTION: &str = "create_invitation";
 pub const REVOKE_INVITATION_ACTION: &str = "revoke_invitation";
 pub const UPDATE_MEMBER_ROLE_ACTION: &str = "update_member_role";
@@ -60,6 +66,48 @@ impl AdminDataSource for OrganizationAdminData {
 impl AdminActionSource for OrganizationAdminData {
     async fn invoke(&self, action: &str, input: Value) -> AppResult<Value> {
         match action {
+            CREATE_ORGANIZATION_ACTION => {
+                let name = required_string(&input, "name")?;
+                let slug = required_string(&input, "slug")?;
+                let owner_auth_user_id = required_string(&input, "owner_auth_user_id")?;
+                let organization = self
+                    .repository
+                    .create_organization_with_owner(
+                        name,
+                        slug,
+                        &AuthUserId(owner_auth_user_id.to_owned()),
+                        Utc::now(),
+                    )
+                    .await?;
+                Ok(organization_to_value(organization))
+            }
+            ARCHIVE_ORGANIZATION_ACTION => {
+                let organization_id = required_string(&input, "organization_id")?;
+                let archived = self
+                    .repository
+                    .archive_organization(organization_id, Utc::now())
+                    .await?;
+                Ok(serde_json::json!({ "organization_id": organization_id, "archived": archived }))
+            }
+            CREATE_ROLE_ACTION => {
+                let organization_id = required_string(&input, "organization_id")?;
+                let name = required_string(&input, "name")?;
+                let permissions = required_string_array(&input, "permissions")?;
+                let role = self
+                    .repository
+                    .create_role(organization_id, name, &permissions, Utc::now())
+                    .await?;
+                Ok(role_to_value(role))
+            }
+            UPDATE_ROLE_PERMISSIONS_ACTION => {
+                let role_id = required_string(&input, "role_id")?;
+                let permissions = required_string_array(&input, "permissions")?;
+                let updated = self
+                    .repository
+                    .update_role_permissions(role_id, &permissions, Utc::now())
+                    .await?;
+                Ok(serde_json::json!({ "role_id": role_id, "updated": updated }))
+            }
             CREATE_INVITATION_ACTION => {
                 let organization_id = required_string(&input, "organization_id")?;
                 let email = required_string(&input, "email")?;
@@ -120,6 +168,37 @@ fn required_string<'a>(input: &'a Value, name: &str) -> AppResult<&'a str> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| AppError::new(ErrorCode::Validation, format!("{name} is required")))
+}
+
+fn required_string_array(input: &Value, name: &str) -> AppResult<Vec<String>> {
+    let values = input
+        .get(name)
+        .and_then(Value::as_array)
+        .ok_or_else(|| AppError::new(ErrorCode::Validation, format!("{name} is required")))?;
+    let mut seen = HashSet::new();
+    let mut strings = Vec::new();
+    for value in values {
+        let string = value
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                AppError::new(
+                    ErrorCode::Validation,
+                    format!("{name} must be an array of non-empty strings"),
+                )
+            })?;
+        if seen.insert(string.to_owned()) {
+            strings.push(string.to_owned());
+        }
+    }
+    if strings.is_empty() {
+        return Err(AppError::new(
+            ErrorCode::Validation,
+            format!("{name} is required"),
+        ));
+    }
+    Ok(strings)
 }
 
 fn required_timestamp(input: &Value, name: &str) -> AppResult<DateTime<Utc>> {

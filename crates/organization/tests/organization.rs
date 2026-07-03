@@ -322,6 +322,217 @@ async fn http_routes_create_list_invite_accept_and_deny_without_actor_scopes() {
     db.cleanup().await;
 }
 
+#[tokio::test]
+async fn console_admin_actions_create_archive_and_manage_roles() {
+    let Some(db) = migrated_database().await else {
+        return;
+    };
+
+    seed_user(&db.pool, "usr_console_owner").await;
+
+    let repo = Arc::new(PostgresOrganizationRepository::new(db.pool.clone()));
+    let admin = OrganizationAdminData::new(repo.clone());
+    let created = admin
+        .invoke(
+            "create_organization",
+            json!({
+                "name": "Console Org",
+                "slug": "console-org",
+                "owner_auth_user_id": "usr_console_owner"
+            }),
+        )
+        .await
+        .expect("create organization action");
+
+    let organization_id = created["id"].as_str().expect("organization id");
+    assert_eq!(created["name"], "Console Org");
+    assert_eq!(created["slug"], "console-org");
+
+    let custom_role = admin
+        .invoke(
+            "create_role",
+            json!({
+                "organization_id": organization_id,
+                "name": "billing",
+                "permissions": [
+                    "organization.read",
+                    "billing.invoices.read",
+                    "billing.invoices.manage"
+                ]
+            }),
+        )
+        .await
+        .expect("create role action");
+    let role_id = custom_role["id"].as_str().expect("role id");
+    assert_eq!(custom_role["system_key"], Value::Null);
+    assert_eq!(custom_role["permissions"][1], "billing.invoices.read");
+
+    let updated = admin
+        .invoke(
+            "update_role_permissions",
+            json!({
+                "role_id": role_id,
+                "permissions": ["organization.read", "billing.invoices.read"]
+            }),
+        )
+        .await
+        .expect("update role permissions action");
+    assert_eq!(updated["updated"], true);
+
+    let role_record = admin
+        .get("roles", role_id)
+        .await
+        .expect("get role")
+        .expect("role exists");
+    assert_eq!(
+        role_record["permissions"],
+        json!(["organization.read", "billing.invoices.read"])
+    );
+
+    let owner_role = repo
+        .owner_role_for_organization(organization_id)
+        .await
+        .expect("owner role");
+    let rejected = admin
+        .invoke(
+            "update_role_permissions",
+            json!({
+                "role_id": owner_role.id,
+                "permissions": ["organization.read"]
+            }),
+        )
+        .await
+        .expect_err("owner role permissions are protected");
+    assert!(
+        rejected
+            .to_string()
+            .contains("owner role permissions cannot be changed")
+    );
+
+    let archived = admin
+        .invoke(
+            "archive_organization",
+            json!({ "organization_id": organization_id }),
+        )
+        .await
+        .expect("archive organization action");
+    assert_eq!(archived["archived"], true);
+
+    let organization_record = admin
+        .get("organizations", organization_id)
+        .await
+        .expect("get organization")
+        .expect("organization exists");
+    assert!(organization_record["archived_at"].as_str().is_some());
+
+    let visible_to_owner = organization::public::list_user_organizations(
+        &db.pool,
+        &AuthUserId("usr_console_owner".to_owned()),
+    )
+    .await
+    .expect("list user organizations");
+    assert!(visible_to_owner.is_empty());
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn archived_organizations_reject_invitations_memberships_and_role_updates() {
+    let Some(db) = migrated_database().await else {
+        return;
+    };
+
+    seed_user(&db.pool, "usr_archive_owner").await;
+    seed_user(&db.pool, "usr_archive_invited").await;
+
+    let now = Utc::now();
+    let owner = AuthUserId("usr_archive_owner".to_owned());
+    let repo = Arc::new(PostgresOrganizationRepository::new(db.pool.clone()));
+    let organization = repo
+        .create_organization_with_owner("Archive Org", "archive-org", &owner, now)
+        .await
+        .expect("organization created");
+    let member_role = repo
+        .member_role_for_organization(&organization.id)
+        .await
+        .expect("member role");
+    let invitation = repo
+        .create_invitation(
+            &organization.id,
+            "before-archive@example.com",
+            &member_role.id,
+            now + Duration::days(1),
+            now,
+        )
+        .await
+        .expect("pre-archive invitation");
+    let custom_role = repo
+        .create_role(
+            &organization.id,
+            " billing ",
+            &[
+                " organization.read ".to_owned(),
+                "billing.invoices.read".to_owned(),
+                "organization.read".to_owned(),
+            ],
+            now,
+        )
+        .await
+        .expect("custom role");
+    assert_eq!(
+        custom_role.permissions,
+        vec!["organization.read", "billing.invoices.read"]
+    );
+
+    assert!(
+        repo.archive_organization(&organization.id, now)
+            .await
+            .expect("archive organization")
+    );
+
+    let rejected_invitation = repo
+        .create_invitation(
+            &organization.id,
+            "after-archive@example.com",
+            &member_role.id,
+            now + Duration::days(1),
+            now,
+        )
+        .await
+        .expect_err("archived organization rejects new invitations");
+    assert!(
+        rejected_invitation
+            .to_string()
+            .contains("organization is archived")
+    );
+
+    let rejected_acceptance = repo
+        .accept_invitation(
+            &invitation.token,
+            &AuthUserId("usr_archive_invited".to_owned()),
+            now,
+        )
+        .await
+        .expect_err("archived organization rejects outstanding invitations");
+    assert!(
+        rejected_acceptance
+            .to_string()
+            .contains("organization is archived")
+    );
+
+    let rejected_role_update = repo
+        .update_role_permissions(&custom_role.id, &["organization.read".to_owned()], now)
+        .await
+        .expect_err("archived organization rejects role permission updates");
+    assert!(
+        rejected_role_update
+            .to_string()
+            .contains("organization is archived")
+    );
+
+    db.cleanup().await;
+}
+
 async fn migrated_database() -> Option<TestDatabase> {
     let db = TestDatabase::create().await?;
     let migrations = PLATFORM_MIGRATIONS

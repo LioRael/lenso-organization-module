@@ -1,6 +1,7 @@
 use crate::admin::{
-    CREATE_INVITATION_ACTION, OrganizationAdminData, REMOVE_MEMBER_ACTION,
-    REVOKE_INVITATION_ACTION, UPDATE_MEMBER_ROLE_ACTION,
+    ARCHIVE_ORGANIZATION_ACTION, CREATE_INVITATION_ACTION, CREATE_ORGANIZATION_ACTION,
+    CREATE_ROLE_ACTION, OrganizationAdminData, REMOVE_MEMBER_ACTION, REVOKE_INVITATION_ACTION,
+    UPDATE_MEMBER_ROLE_ACTION, UPDATE_ROLE_PERMISSIONS_ACTION,
 };
 use crate::migrations::ORGANIZATION_MIGRATIONS;
 use crate::repositories::PostgresOrganizationRepository;
@@ -142,6 +143,17 @@ pub fn admin_surface() -> AdminDeclarativeSurface {
             page("invitations", "Invitations"),
         ],
         actions: vec![
+            create_organization_action(),
+            string_action(
+                ARCHIVE_ORGANIZATION_ACTION,
+                "Archive organization",
+                ORGANIZATION_MANAGE,
+                "organization_id",
+                "Organization",
+                AdminActionDangerLevel::High,
+            ),
+            create_role_action(),
+            update_role_permissions_action(),
             create_invitation_action(),
             string_pair_action(
                 UPDATE_MEMBER_ROLE_ACTION,
@@ -244,6 +256,80 @@ fn page(entity: &str, label: &str) -> AdminDeclarativePage {
                 entity: entity.to_owned(),
             },
         }],
+    }
+}
+
+fn create_organization_action() -> AdminAction {
+    AdminAction {
+        name: CREATE_ORGANIZATION_ACTION.to_owned(),
+        label: "Create organization".to_owned(),
+        capability: ORGANIZATION_MANAGE.to_owned(),
+        input_schema: Some(AdminActionInputSchema {
+            fields: vec![
+                input("name", "Name", FieldType::String, true, None),
+                input("slug", "Slug", FieldType::String, true, None),
+                input(
+                    "owner_auth_user_id",
+                    "Owner auth user",
+                    FieldType::String,
+                    true,
+                    None,
+                ),
+            ],
+        }),
+        confirmation: None,
+        danger_level: AdminActionDangerLevel::Low,
+    }
+}
+
+fn create_role_action() -> AdminAction {
+    AdminAction {
+        name: CREATE_ROLE_ACTION.to_owned(),
+        label: "Create role".to_owned(),
+        capability: ORGANIZATION_ROLES_MANAGE.to_owned(),
+        input_schema: Some(AdminActionInputSchema {
+            fields: vec![
+                input(
+                    "organization_id",
+                    "Organization",
+                    FieldType::String,
+                    true,
+                    None,
+                ),
+                input("name", "Name", FieldType::String, true, None),
+                input(
+                    "permissions",
+                    "Permissions",
+                    FieldType::Json,
+                    true,
+                    Some("JSON array of permission strings".to_owned()),
+                ),
+            ],
+        }),
+        confirmation: None,
+        danger_level: AdminActionDangerLevel::Low,
+    }
+}
+
+fn update_role_permissions_action() -> AdminAction {
+    AdminAction {
+        name: UPDATE_ROLE_PERMISSIONS_ACTION.to_owned(),
+        label: "Update role permissions".to_owned(),
+        capability: ORGANIZATION_ROLES_MANAGE.to_owned(),
+        input_schema: Some(AdminActionInputSchema {
+            fields: vec![
+                input("role_id", "Role", FieldType::String, true, None),
+                input(
+                    "permissions",
+                    "Permissions",
+                    FieldType::Json,
+                    true,
+                    Some("JSON array of permission strings".to_owned()),
+                ),
+            ],
+        }),
+        confirmation: None,
+        danger_level: AdminActionDangerLevel::Medium,
     }
 }
 
