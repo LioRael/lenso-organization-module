@@ -1,0 +1,78 @@
+{
+  "exportName": "organizationConsoleModule",
+  "id": "organization",
+  "bundle": {
+    "hostApi": "1",
+    "path": "dist/organization-console.js",
+    "styles": ["dist/organization-console.css"]
+  },
+  "packageName": "@lenso/organization-console",
+  "source": "runtime_bundle",
+  "surfaces": [
+    {
+      "area": "data",
+      "icon": "boxes",
+      "label": "Organizations",
+      "navigation": {
+        "order": 70,
+        "workspace": {
+          "icon": "boxes",
+          "id": "organization",
+          "label": "Organization"
+        }
+      },
+      "requiredCapabilities": ["organization.read"],
+      "route": "/data/organization",
+      "surfaceName": "organizations"
+    },
+    {
+      "area": "data",
+      "icon": "users",
+      "label": "Members",
+      "navigation": {
+        "order": 80,
+        "workspace": {
+          "icon": "boxes",
+          "id": "organization",
+          "label": "Organization"
+        }
+      },
+      "requiredCapabilities": ["organization.members.manage"],
+      "route": "/data/organization/members",
+      "surfaceName": "members"
+    },
+    {
+      "area": "data",
+      "icon": "shield",
+      "label": "Roles",
+      "navigation": {
+        "order": 90,
+        "workspace": {
+          "icon": "boxes",
+          "id": "organization",
+          "label": "Organization"
+        }
+      },
+      "requiredCapabilities": ["organization.roles.manage"],
+      "route": "/data/organization/roles",
+      "surfaceName": "roles"
+    },
+    {
+      "area": "data",
+      "icon": "key-round",
+      "label": "Invitations",
+      "navigation": {
+        "order": 100,
+        "workspace": {
+          "icon": "boxes",
+          "id": "organization",
+          "label": "Organization"
+        }
+      },
+      "requiredCapabilities": ["organization.invitations.manage"],
+      "route": "/data/organization/invitations",
+      "surfaceName": "invitations"
+    }
+  ],
+  "version": "workspace"
+}

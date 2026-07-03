@@ -1,6 +1,7 @@
 use crate::admin::{
-    CREATE_INVITATION_ACTION, OrganizationAdminData, REMOVE_MEMBER_ACTION,
-    REVOKE_INVITATION_ACTION, UPDATE_MEMBER_ROLE_ACTION,
+    ARCHIVE_ORGANIZATION_ACTION, CREATE_INVITATION_ACTION, CREATE_ORGANIZATION_ACTION,
+    CREATE_ROLE_ACTION, OrganizationAdminData, REMOVE_MEMBER_ACTION, REVOKE_INVITATION_ACTION,
+    UPDATE_MEMBER_ROLE_ACTION, UPDATE_ROLE_PERMISSIONS_ACTION,
 };
 use crate::migrations::ORGANIZATION_MIGRATIONS;
 use crate::repositories::PostgresOrganizationRepository;
@@ -9,7 +10,8 @@ use platform_http::ApiOpenApiRouter;
 use platform_module::{
     AdminAction, AdminActionDangerLevel, AdminActionInputField, AdminActionInputSchema,
     AdminDeclarativeComponent, AdminDeclarativePage, AdminDeclarativeSection,
-    AdminDeclarativeSurface, AdminSchema, EntitySchema, FieldSchema, FieldType, HostLinkedModule,
+    AdminDeclarativeSurface, AdminSchema, ConsoleArea, ConsoleNavigation, ConsolePackage,
+    ConsoleSurface, ConsoleWorkspaceRef, EntitySchema, FieldSchema, FieldType, HostLinkedModule,
     LinkedBinding, LinkedHttpContribution, Module, ModuleHttpMethod, ModuleHttpRoute,
     ModuleManifest,
 };
@@ -17,6 +19,8 @@ use std::sync::Arc;
 
 pub const MODULE_NAME: &str = "organization";
 pub const AUTH_MODULE_DEPENDENCY: &str = "auth";
+pub const ORGANIZATION_CONSOLE_PACKAGE: &str = "@lenso/organization-console";
+pub const ORGANIZATION_CONSOLE_EXPORT: &str = "organizationConsoleModule";
 pub const ORGANIZATION_READ: &str = "organization.read";
 pub const ORGANIZATION_MANAGE: &str = "organization.manage";
 pub const ORGANIZATION_MEMBERS_MANAGE: &str = "organization.members.manage";
@@ -142,6 +146,17 @@ pub fn admin_surface() -> AdminDeclarativeSurface {
             page("invitations", "Invitations"),
         ],
         actions: vec![
+            create_organization_action(),
+            string_action(
+                ARCHIVE_ORGANIZATION_ACTION,
+                "Archive organization",
+                ORGANIZATION_MANAGE,
+                "organization_id",
+                "Organization",
+                AdminActionDangerLevel::High,
+            ),
+            create_role_action(),
+            update_role_permissions_action(),
             create_invitation_action(),
             string_pair_action(
                 UPDATE_MEMBER_ROLE_ACTION,
@@ -174,12 +189,85 @@ pub fn admin_surface() -> AdminDeclarativeSurface {
     }
 }
 
+fn organization_workspace() -> ConsoleWorkspaceRef {
+    ConsoleWorkspaceRef {
+        id: "organization".to_owned(),
+        label: "Organization".to_owned(),
+        icon: Some("boxes".to_owned()),
+    }
+}
+
+pub fn console_surfaces() -> Vec<ConsoleSurface> {
+    vec![
+        console_surface(
+            "organizations",
+            "Organizations",
+            "/data/organization",
+            "boxes",
+            ORGANIZATION_READ,
+            70,
+        ),
+        console_surface(
+            "members",
+            "Members",
+            "/data/organization/members",
+            "users",
+            ORGANIZATION_MEMBERS_MANAGE,
+            80,
+        ),
+        console_surface(
+            "roles",
+            "Roles",
+            "/data/organization/roles",
+            "shield",
+            ORGANIZATION_ROLES_MANAGE,
+            90,
+        ),
+        console_surface(
+            "invitations",
+            "Invitations",
+            "/data/organization/invitations",
+            "key-round",
+            ORGANIZATION_INVITATIONS_MANAGE,
+            100,
+        ),
+    ]
+}
+
+fn console_surface(
+    name: &str,
+    label: &str,
+    route: &str,
+    icon: &str,
+    capability: &str,
+    order: i32,
+) -> ConsoleSurface {
+    ConsoleSurface {
+        name: name.to_owned(),
+        label: label.to_owned(),
+        area: ConsoleArea::Data,
+        route: route.to_owned(),
+        package: ConsolePackage {
+            name: ORGANIZATION_CONSOLE_PACKAGE.to_owned(),
+            export: ORGANIZATION_CONSOLE_EXPORT.to_owned(),
+        },
+        icon: Some(icon.to_owned()),
+        required_capabilities: vec![capability.to_owned()],
+        navigation: Some(ConsoleNavigation {
+            workspace: organization_workspace(),
+            group: None,
+            order: Some(order),
+        }),
+    }
+}
+
 pub fn manifest() -> ModuleManifest {
     ModuleManifest::builder(MODULE_NAME)
         .dependencies(vec![AUTH_MODULE_DEPENDENCY.to_owned()])
         .capabilities(capabilities())
         .http_routes(http_routes())
         .declarative_admin(admin_surface())
+        .console(console_surfaces())
         .build()
 }
 
@@ -244,6 +332,80 @@ fn page(entity: &str, label: &str) -> AdminDeclarativePage {
                 entity: entity.to_owned(),
             },
         }],
+    }
+}
+
+fn create_organization_action() -> AdminAction {
+    AdminAction {
+        name: CREATE_ORGANIZATION_ACTION.to_owned(),
+        label: "Create organization".to_owned(),
+        capability: ORGANIZATION_MANAGE.to_owned(),
+        input_schema: Some(AdminActionInputSchema {
+            fields: vec![
+                input("name", "Name", FieldType::String, true, None),
+                input("slug", "Slug", FieldType::String, true, None),
+                input(
+                    "owner_auth_user_id",
+                    "Owner auth user",
+                    FieldType::String,
+                    true,
+                    None,
+                ),
+            ],
+        }),
+        confirmation: None,
+        danger_level: AdminActionDangerLevel::Low,
+    }
+}
+
+fn create_role_action() -> AdminAction {
+    AdminAction {
+        name: CREATE_ROLE_ACTION.to_owned(),
+        label: "Create role".to_owned(),
+        capability: ORGANIZATION_ROLES_MANAGE.to_owned(),
+        input_schema: Some(AdminActionInputSchema {
+            fields: vec![
+                input(
+                    "organization_id",
+                    "Organization",
+                    FieldType::String,
+                    true,
+                    None,
+                ),
+                input("name", "Name", FieldType::String, true, None),
+                input(
+                    "permissions",
+                    "Permissions",
+                    FieldType::Json,
+                    true,
+                    Some("JSON array of permission strings".to_owned()),
+                ),
+            ],
+        }),
+        confirmation: None,
+        danger_level: AdminActionDangerLevel::Low,
+    }
+}
+
+fn update_role_permissions_action() -> AdminAction {
+    AdminAction {
+        name: UPDATE_ROLE_PERMISSIONS_ACTION.to_owned(),
+        label: "Update role permissions".to_owned(),
+        capability: ORGANIZATION_ROLES_MANAGE.to_owned(),
+        input_schema: Some(AdminActionInputSchema {
+            fields: vec![
+                input("role_id", "Role", FieldType::String, true, None),
+                input(
+                    "permissions",
+                    "Permissions",
+                    FieldType::Json,
+                    true,
+                    Some("JSON array of permission strings".to_owned()),
+                ),
+            ],
+        }),
+        confirmation: None,
+        danger_level: AdminActionDangerLevel::Medium,
     }
 }
 
@@ -361,6 +523,7 @@ mod tests {
             manifest.admin,
             Some(AdminSurface::DeclarativeCustom(admin_surface()))
         );
+        assert_eq!(manifest.console, console_surfaces());
 
         let lints = platform_module::lint_module_manifest(ModuleSource::Linked, &manifest);
         assert!(
@@ -368,6 +531,26 @@ mod tests {
                 .iter()
                 .all(|lint| lint.severity == ModuleManifestLintSeverity::Ok),
             "organization manifest should not have warning/error lints: {lints:?}"
+        );
+    }
+
+    #[test]
+    fn manifest_declares_console_surfaces() {
+        let manifest = manifest();
+
+        assert_eq!(manifest.console, console_surfaces());
+        assert_eq!(manifest.console.len(), 4);
+        assert_eq!(manifest.console[0].route, "/data/organization");
+        assert_eq!(manifest.console[1].route, "/data/organization/members");
+        assert_eq!(manifest.console[2].route, "/data/organization/roles");
+        assert_eq!(manifest.console[3].route, "/data/organization/invitations");
+        assert_eq!(
+            manifest.console[0].package.name,
+            "@lenso/organization-console"
+        );
+        assert_eq!(
+            manifest.console[0].package.export,
+            "organizationConsoleModule"
         );
     }
 

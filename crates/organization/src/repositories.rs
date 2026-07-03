@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use platform_core::{AppError, AppResult, DbPool, ErrorCode};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fmt::Write as _;
 
 pub const OWNER_PERMISSIONS: &[&str] = &[
@@ -247,6 +248,16 @@ impl PostgresOrganizationRepository {
                 "expires_at must be in the future",
             ));
         }
+        let organization = self
+            .find_organization(organization_id)
+            .await?
+            .ok_or_else(|| AppError::new(ErrorCode::NotFound, "organization not found"))?;
+        if organization.archived_at.is_some() {
+            return Err(AppError::new(
+                ErrorCode::Validation,
+                "organization is archived",
+            ));
+        }
         let role = self
             .find_role(role_id)
             .await?
@@ -315,6 +326,19 @@ impl PostgresOrganizationRepository {
             return Err(AppError::new(
                 ErrorCode::Validation,
                 "invitation has expired",
+            ));
+        }
+        let archived_at = sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
+            "select archived_at from organization.organizations where id = $1",
+        )
+        .bind(&invitation.organization_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sql_error)?;
+        if archived_at.is_some() {
+            return Err(AppError::new(
+                ErrorCode::Validation,
+                "organization is archived",
             ));
         }
 
@@ -423,6 +447,110 @@ impl PostgresOrganizationRepository {
             "#,
         )
         .bind(membership_id)
+        .bind(now)
+        .fetch_optional(&self.pool)
+        .await
+        .map(|row| row.is_some())
+        .map_err(map_sql_error)
+    }
+
+    pub async fn create_role(
+        &self,
+        organization_id: &str,
+        name: &str,
+        permissions: &[String],
+        now: DateTime<Utc>,
+    ) -> AppResult<Role> {
+        let name = required_trimmed(name, "name")?;
+        let permissions = normalize_permissions(permissions)?;
+        let organization = self
+            .find_organization(organization_id)
+            .await?
+            .ok_or_else(|| AppError::new(ErrorCode::NotFound, "organization not found"))?;
+        if organization.archived_at.is_some() {
+            return Err(AppError::new(
+                ErrorCode::Validation,
+                "organization is archived",
+            ));
+        }
+
+        sqlx::query_as::<_, RoleRow>(
+            r#"
+            insert into organization.roles (id, organization_id, name, permissions, system_key, created_at, updated_at)
+            values ($1, $2, $3, $4, null, $5, $5)
+            returning id, organization_id, name, permissions, system_key, created_at, updated_at
+            "#,
+        )
+        .bind(new_id("org_role"))
+        .bind(organization_id)
+        .bind(name)
+        .bind(serde_json::to_value(&permissions).expect("permissions serializes"))
+        .bind(now)
+        .fetch_one(&self.pool)
+        .await
+        .map(role_from_row)
+        .map_err(map_sql_error)
+    }
+
+    pub async fn update_role_permissions(
+        &self,
+        role_id: &str,
+        permissions: &[String],
+        now: DateTime<Utc>,
+    ) -> AppResult<bool> {
+        let role = self
+            .find_role(role_id)
+            .await?
+            .ok_or_else(|| AppError::new(ErrorCode::NotFound, "role not found"))?;
+        if role.system_key.as_deref() == Some("owner") {
+            return Err(AppError::new(
+                ErrorCode::Validation,
+                "owner role permissions cannot be changed",
+            ));
+        }
+        let organization = self
+            .find_organization(&role.organization_id)
+            .await?
+            .ok_or_else(|| AppError::new(ErrorCode::NotFound, "organization not found"))?;
+        if organization.archived_at.is_some() {
+            return Err(AppError::new(
+                ErrorCode::Validation,
+                "organization is archived",
+            ));
+        }
+        let permissions = normalize_permissions(permissions)?;
+
+        sqlx::query_scalar::<_, String>(
+            r#"
+            update organization.roles
+            set permissions = $2, updated_at = $3
+            where id = $1
+            returning id
+            "#,
+        )
+        .bind(role_id)
+        .bind(serde_json::to_value(&permissions).expect("permissions serializes"))
+        .bind(now)
+        .fetch_optional(&self.pool)
+        .await
+        .map(|row| row.is_some())
+        .map_err(map_sql_error)
+    }
+
+    pub async fn archive_organization(
+        &self,
+        organization_id: &str,
+        now: DateTime<Utc>,
+    ) -> AppResult<bool> {
+        sqlx::query_scalar::<_, String>(
+            r#"
+            update organization.organizations
+            set archived_at = $2, updated_at = $2
+            where id = $1 and archived_at is null
+            returning id
+            "#,
+        )
+        .bind(organization_id)
         .bind(now)
         .fetch_optional(&self.pool)
         .await
@@ -813,6 +941,30 @@ fn required_trimmed<'a>(value: &'a str, name: &str) -> AppResult<&'a str> {
         ));
     }
     Ok(value)
+}
+
+fn normalize_permissions(values: &[String]) -> AppResult<Vec<String>> {
+    let mut seen = HashSet::new();
+    let mut permissions = Vec::new();
+    for value in values {
+        let permission = value.trim();
+        if permission.is_empty() {
+            return Err(AppError::new(
+                ErrorCode::Validation,
+                "permissions cannot contain empty values",
+            ));
+        }
+        if seen.insert(permission.to_owned()) {
+            permissions.push(permission.to_owned());
+        }
+    }
+    if permissions.is_empty() {
+        return Err(AppError::new(
+            ErrorCode::Validation,
+            "permissions are required",
+        ));
+    }
+    Ok(permissions)
 }
 
 fn unknown_entity(entity: &str) -> AppError {
