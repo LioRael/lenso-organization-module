@@ -10,7 +10,7 @@
     "noEmitOnError": true,
     "strict": true,
     "target": "ES2024",
-    "tsBuildInfoFile": "./node_modules/.cache/tsconfig.tsbuildinfo",
+    "tsBuildInfoFile": "../../target/typescript/organization-console.tsbuildinfo",
     "types": ["vitest/globals"]
   },
   "include": ["src", "console-surface.json", "vite.config.ts"]
