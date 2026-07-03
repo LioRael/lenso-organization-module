@@ -2,15 +2,15 @@
   "compilerOptions": {
     "allowSyntheticDefaultImports": true,
     "composite": true,
-    "declaration": true,
-    "emitDeclarationOnly": true,
     "jsx": "react-jsx",
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "noEmit": true,
     "noEmitOnError": true,
     "strict": true,
     "target": "ES2024",
+    "tsBuildInfoFile": "./node_modules/.cache/tsconfig.tsbuildinfo",
     "types": ["vitest/globals"]
   },
   "include": ["src", "console-surface.json", "vite.config.ts"]
