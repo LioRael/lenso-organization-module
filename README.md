@@ -41,6 +41,38 @@ pub fn host_composition() -> HostComposition {
 - Public helpers such as `has_permission` and `accept_invitation`.
 - HTTP routes and schema-admin/admin-action surfaces.
 
+## Runtime Console
+
+The module declares package-backed Runtime Console surfaces through
+`organization::module::linked_module()`. Install the Rust modules first:
+
+```sh
+lenso module install auth
+lenso module install organization
+```
+
+After `@lenso/organization-console` is published, hosts that use Runtime Console
+extensions can install the Console package:
+
+```sh
+pnpm add @lenso/organization-console
+```
+
+For local smoke testing before publication, run `pnpm build` in this repo and
+install or copy the generated bundle into the host extension registry.
+
+The Console workspace exposes:
+
+- Organizations: create and archive organizations.
+- Members: inspect memberships, update member roles, and remove members.
+- Roles: create custom roles and update role permission arrays. Seeded `owner`
+  role is protected from permission edits.
+- Invitations: create invitations, copy the raw token returned once, and revoke
+  unaccepted invitations.
+
+Security note: invitation tokens are stored only as hashes in Postgres. The
+Console never lists `token_hash`, and this module still does not send email.
+
 ## Basic Usage
 
 Create an organization and make an auth user its owner:
