@@ -8,7 +8,7 @@ license = "MIT"
 rust-version = "1.94"
 
 [workspace.dependencies]
-audit-log = { package = "lenso-module-audit-log", path = "../lenso-audit-log-module/crates/audit-log" }
+audit-log = { package = "lenso-module-audit-log", version = "0.1.0", path = "../lenso-audit-log-module/crates/audit-log" }
 async-trait = "0.1"
 auth = { package = "lenso-module-auth", version = "0.1.6" }
 axum = "0.8"

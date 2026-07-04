@@ -110,6 +110,7 @@ fn organization_scope(id: &str, display: Option<String>) -> AuditScope {
 mod tests {
     use super::*;
     use crate::models::{Invitation, Membership};
+    use audit_log::models::{AuditOutcome, AuditSeverity};
     use auth::public::AuthUserId;
     use chrono::TimeZone;
     use platform_core::{ActorContext, CorrelationId, RequestId};
@@ -138,6 +139,8 @@ mod tests {
         assert_eq!(organization_event.event_name, "organization.created");
         assert_eq!(organization_event.module_name, MODULE_NAME);
         assert_eq!(organization_event.action, "created");
+        assert_eq!(organization_event.outcome, AuditOutcome::Success);
+        assert_eq!(organization_event.severity, AuditSeverity::Info);
         assert_eq!(
             organization_event.scope.expect("organization scope"),
             AuditScope {
@@ -174,6 +177,12 @@ mod tests {
         };
 
         let invitation_event = invitation_created(&request_ctx, &created, now);
+        assert_success_context(
+            &invitation_event,
+            "organization.invitation_created",
+            "invitation_created",
+            "org_1",
+        );
         assert_eq!(
             invitation_event.resource.expect("invitation resource"),
             AuditResource {
@@ -198,6 +207,12 @@ mod tests {
         };
 
         let accepted_event = invitation_accepted(&request_ctx, &membership, now);
+        assert_success_context(
+            &accepted_event,
+            "organization.invitation_accepted",
+            "invitation_accepted",
+            "org_1",
+        );
         assert_eq!(
             accepted_event.resource.expect("membership resource"),
             AuditResource {
@@ -209,5 +224,28 @@ mod tests {
         assert_eq!(accepted_event.metadata["auth_user_id"], "usr_member");
         assert_eq!(accepted_event.metadata["role_id"], "role_member");
         assert_eq!(accepted_event.metadata["role_name"], "member");
+    }
+
+    fn assert_success_context(
+        event: &AuditEventInput,
+        event_name: &str,
+        action: &str,
+        scope_id: &str,
+    ) {
+        assert_eq!(event.event_name, event_name);
+        assert_eq!(event.action, action);
+        assert_eq!(event.module_name, MODULE_NAME);
+        assert_eq!(event.outcome, AuditOutcome::Success);
+        assert_eq!(event.severity, AuditSeverity::Info);
+
+        let scope = event.scope.as_ref().expect("organization scope");
+        assert_eq!(scope.module.as_deref(), Some(MODULE_NAME));
+        assert_eq!(scope.scope_type, "organization");
+        assert_eq!(scope.id, scope_id);
+
+        let request = event.request.as_ref().expect("request context");
+        assert_eq!(request.correlation_id.as_deref(), Some("corr_audit"));
+        assert_eq!(request.request_id.as_deref(), Some("req_audit"));
+        assert_eq!(request.story_id.as_deref(), Some("corr_audit"));
     }
 }
