@@ -335,6 +335,7 @@ async fn http_routes_write_audit_events_when_audit_feature_is_enabled() {
     let _ = PostgresOrganizationRepository::create_invitation_audited;
     let _ = PostgresOrganizationRepository::accept_invitation_audited;
 
+    // Host composition must install/apply the audit-log module; this test does so manually.
     let Some(db) = migrated_database().await else {
         return;
     };

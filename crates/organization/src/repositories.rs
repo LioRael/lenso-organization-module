@@ -270,9 +270,15 @@ impl PostgresOrganizationRepository {
         let created = self
             .create_invitation(organization_id, email, role_id, expires_at, now)
             .await?;
-        PostgresAuditLogRepository::new(self.pool.clone())
-            .record_event(crate::audit::invitation_created(request_ctx, &created, now))
-            .await?;
+        let audit_repository = PostgresAuditLogRepository::new(self.pool.clone());
+        record_best_effort(
+            audit_repository.record_event(crate::audit::invitation_created(
+                request_ctx,
+                &created,
+                now,
+            )),
+        )
+        .await;
         Ok(created)
     }
 
@@ -366,13 +372,15 @@ impl PostgresOrganizationRepository {
         now: DateTime<Utc>,
     ) -> AppResult<Membership> {
         let membership = self.accept_invitation(token, auth_user_id, now).await?;
-        PostgresAuditLogRepository::new(self.pool.clone())
-            .record_event(crate::audit::invitation_accepted(
+        let audit_repository = PostgresAuditLogRepository::new(self.pool.clone());
+        record_best_effort(
+            audit_repository.record_event(crate::audit::invitation_accepted(
                 request_ctx,
                 &membership,
                 now,
-            ))
-            .await?;
+            )),
+        )
+        .await;
         Ok(membership)
     }
 
@@ -829,6 +837,15 @@ async fn insert_role(
     .map_err(map_sql_error)
 }
 
+#[cfg(feature = "audit-log")]
+async fn record_best_effort(
+    recording: impl std::future::Future<Output = AppResult<audit_log::models::AuditEvent>>,
+) {
+    if let Err(_error) = recording.await {
+        // Proof audit events must not fail an already-committed business operation.
+    }
+}
+
 type OrganizationRow = (
     String,
     String,
@@ -1063,4 +1080,18 @@ fn map_sql_error(error: sqlx::Error) -> AppError {
         }
     }
     AppError::new(ErrorCode::Internal, error.to_string())
+}
+
+#[cfg(all(test, feature = "audit-log"))]
+mod tests {
+    use super::*;
+    use std::future::ready;
+
+    #[tokio::test]
+    async fn audit_proof_event_recording_is_best_effort() {
+        record_best_effort(ready(Err::<audit_log::models::AuditEvent, _>(
+            AppError::new(ErrorCode::Internal, "audit unavailable"),
+        )))
+        .await;
+    }
 }

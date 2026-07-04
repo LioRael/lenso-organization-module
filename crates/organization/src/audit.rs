@@ -105,3 +105,109 @@ fn organization_scope(id: &str, display: Option<String>) -> AuditScope {
         display,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{Invitation, Membership};
+    use auth::public::AuthUserId;
+    use chrono::TimeZone;
+    use platform_core::{ActorContext, CorrelationId, RequestId};
+
+    #[test]
+    fn audit_adapter_builds_expected_event_mappings() {
+        let now = Utc.with_ymd_and_hms(2026, 7, 5, 12, 0, 0).unwrap();
+        let mut request_ctx = RequestContext::new(
+            RequestId::new("req_audit"),
+            CorrelationId::new("corr_audit"),
+        );
+        request_ctx.actor = ActorContext::User {
+            user_id: "usr_owner".to_owned(),
+            scopes: Vec::new(),
+        };
+        let organization = Organization {
+            id: "org_1".to_owned(),
+            name: "Acme".to_owned(),
+            slug: "acme".to_owned(),
+            created_at: now,
+            updated_at: now,
+            archived_at: None,
+        };
+
+        let organization_event = organization_created(&request_ctx, &organization, now);
+        assert_eq!(organization_event.event_name, "organization.created");
+        assert_eq!(organization_event.module_name, MODULE_NAME);
+        assert_eq!(organization_event.action, "created");
+        assert_eq!(
+            organization_event.scope.expect("organization scope"),
+            AuditScope {
+                module: Some(MODULE_NAME.to_owned()),
+                scope_type: "organization".to_owned(),
+                id: "org_1".to_owned(),
+                display: Some("Acme".to_owned()),
+            }
+        );
+        assert_eq!(
+            organization_event.resource.expect("organization resource"),
+            AuditResource {
+                resource_type: "organization".to_owned(),
+                id: "org_1".to_owned(),
+                display: Some("Acme".to_owned()),
+            }
+        );
+        assert_eq!(organization_event.metadata["slug"], "acme");
+
+        let expires_at = now + chrono::Duration::days(1);
+        let created = CreatedInvitation {
+            invitation: Invitation {
+                id: "invite_1".to_owned(),
+                organization_id: "org_1".to_owned(),
+                email: "member@example.com".to_owned(),
+                role_id: "role_member".to_owned(),
+                expires_at,
+                created_at: now,
+                updated_at: now,
+                accepted_at: None,
+                revoked_at: None,
+            },
+            token: "raw-token".to_owned(),
+        };
+
+        let invitation_event = invitation_created(&request_ctx, &created, now);
+        assert_eq!(
+            invitation_event.resource.expect("invitation resource"),
+            AuditResource {
+                resource_type: "organization_invitation".to_owned(),
+                id: "invite_1".to_owned(),
+                display: Some("member@example.com".to_owned()),
+            }
+        );
+        assert_eq!(invitation_event.metadata["email"], "member@example.com");
+        assert_eq!(invitation_event.metadata["role_id"], "role_member");
+        assert_eq!(invitation_event.metadata["expires_at"], json!(expires_at));
+
+        let membership = Membership {
+            id: "member_1".to_owned(),
+            organization_id: "org_1".to_owned(),
+            auth_user_id: AuthUserId("usr_member".to_owned()),
+            role_id: "role_member".to_owned(),
+            role_name: Some("member".to_owned()),
+            created_at: now,
+            updated_at: now,
+            removed_at: None,
+        };
+
+        let accepted_event = invitation_accepted(&request_ctx, &membership, now);
+        assert_eq!(
+            accepted_event.resource.expect("membership resource"),
+            AuditResource {
+                resource_type: "organization_member".to_owned(),
+                id: "member_1".to_owned(),
+                display: Some("usr_member".to_owned()),
+            }
+        );
+        assert_eq!(accepted_event.metadata["auth_user_id"], "usr_member");
+        assert_eq!(accepted_event.metadata["role_id"], "role_member");
+        assert_eq!(accepted_event.metadata["role_name"], "member");
+    }
+}
