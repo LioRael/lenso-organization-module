@@ -116,26 +116,12 @@ mod tests {
     use platform_core::{ActorContext, CorrelationId, RequestId};
 
     #[test]
-    fn audit_adapter_builds_expected_event_mappings() {
-        let now = Utc.with_ymd_and_hms(2026, 7, 5, 12, 0, 0).unwrap();
-        let mut request_ctx = RequestContext::new(
-            RequestId::new("req_audit"),
-            CorrelationId::new("corr_audit"),
-        );
-        request_ctx.actor = ActorContext::User {
-            user_id: "usr_owner".to_owned(),
-            scopes: Vec::new(),
-        };
-        let organization = Organization {
-            id: "org_1".to_owned(),
-            name: "Acme".to_owned(),
-            slug: "acme".to_owned(),
-            created_at: now,
-            updated_at: now,
-            archived_at: None,
-        };
-
+    fn organization_created_event_mapping_uses_organization_scope() {
+        let now = fixed_now();
+        let request_ctx = request_context();
+        let organization = organization(now);
         let organization_event = organization_created(&request_ctx, &organization, now);
+
         assert_eq!(organization_event.event_name, "organization.created");
         assert_eq!(organization_event.module_name, MODULE_NAME);
         assert_eq!(organization_event.action, "created");
@@ -159,24 +145,15 @@ mod tests {
             }
         );
         assert_eq!(organization_event.metadata["slug"], "acme");
+    }
 
-        let expires_at = now + chrono::Duration::days(1);
-        let created = CreatedInvitation {
-            invitation: Invitation {
-                id: "invite_1".to_owned(),
-                organization_id: "org_1".to_owned(),
-                email: "member@example.com".to_owned(),
-                role_id: "role_member".to_owned(),
-                expires_at,
-                created_at: now,
-                updated_at: now,
-                accepted_at: None,
-                revoked_at: None,
-            },
-            token: "raw-token".to_owned(),
-        };
-
+    #[test]
+    fn invitation_created_event_mapping_uses_invitation_resource() {
+        let now = fixed_now();
+        let request_ctx = request_context();
+        let created = created_invitation(now);
         let invitation_event = invitation_created(&request_ctx, &created, now);
+
         assert_success_context(
             &invitation_event,
             "organization.invitation_created",
@@ -193,20 +170,19 @@ mod tests {
         );
         assert_eq!(invitation_event.metadata["email"], "member@example.com");
         assert_eq!(invitation_event.metadata["role_id"], "role_member");
-        assert_eq!(invitation_event.metadata["expires_at"], json!(expires_at));
+        assert_eq!(
+            invitation_event.metadata["expires_at"],
+            json!(now + chrono::Duration::days(1))
+        );
+    }
 
-        let membership = Membership {
-            id: "member_1".to_owned(),
-            organization_id: "org_1".to_owned(),
-            auth_user_id: AuthUserId("usr_member".to_owned()),
-            role_id: "role_member".to_owned(),
-            role_name: Some("member".to_owned()),
-            created_at: now,
-            updated_at: now,
-            removed_at: None,
-        };
-
+    #[test]
+    fn invitation_accepted_event_mapping_uses_membership_resource() {
+        let now = fixed_now();
+        let request_ctx = request_context();
+        let membership = membership(now);
         let accepted_event = invitation_accepted(&request_ctx, &membership, now);
+
         assert_success_context(
             &accepted_event,
             "organization.invitation_accepted",
@@ -224,6 +200,63 @@ mod tests {
         assert_eq!(accepted_event.metadata["auth_user_id"], "usr_member");
         assert_eq!(accepted_event.metadata["role_id"], "role_member");
         assert_eq!(accepted_event.metadata["role_name"], "member");
+    }
+
+    fn fixed_now() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 7, 5, 12, 0, 0).unwrap()
+    }
+
+    fn request_context() -> RequestContext {
+        let mut request_ctx = RequestContext::new(
+            RequestId::new("req_audit"),
+            CorrelationId::new("corr_audit"),
+        );
+        request_ctx.actor = ActorContext::User {
+            user_id: "usr_owner".to_owned(),
+            scopes: Vec::new(),
+        };
+        request_ctx
+    }
+
+    fn organization(now: DateTime<Utc>) -> Organization {
+        Organization {
+            id: "org_1".to_owned(),
+            name: "Acme".to_owned(),
+            slug: "acme".to_owned(),
+            created_at: now,
+            updated_at: now,
+            archived_at: None,
+        }
+    }
+
+    fn created_invitation(now: DateTime<Utc>) -> CreatedInvitation {
+        CreatedInvitation {
+            invitation: Invitation {
+                id: "invite_1".to_owned(),
+                organization_id: "org_1".to_owned(),
+                email: "member@example.com".to_owned(),
+                role_id: "role_member".to_owned(),
+                expires_at: now + chrono::Duration::days(1),
+                created_at: now,
+                updated_at: now,
+                accepted_at: None,
+                revoked_at: None,
+            },
+            token: "raw-token".to_owned(),
+        }
+    }
+
+    fn membership(now: DateTime<Utc>) -> Membership {
+        Membership {
+            id: "member_1".to_owned(),
+            organization_id: "org_1".to_owned(),
+            auth_user_id: AuthUserId("usr_member".to_owned()),
+            role_id: "role_member".to_owned(),
+            role_name: Some("member".to_owned()),
+            created_at: now,
+            updated_at: now,
+            removed_at: None,
+        }
     }
 
     fn assert_success_context(
