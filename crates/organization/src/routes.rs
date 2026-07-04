@@ -43,13 +43,22 @@ async fn create_organization(
     actor: UserActor,
     JsonBody(input): JsonBody<CreateOrganizationRequest>,
 ) -> Result<Json<OrganizationResponse>, ApiErrorResponse> {
-    let organization = PostgresOrganizationRepository::new(ctx.db.clone())
-        .create_organization_with_owner(
+    let repository = PostgresOrganizationRepository::new(ctx.db.clone());
+    let now = ctx.clock.now();
+    #[cfg(feature = "audit-log")]
+    let organization = repository
+        .create_organization_with_owner_audited(
+            &request_ctx,
             &input.name,
             &input.slug,
             &AuthUserId(actor.user_id),
-            ctx.clock.now(),
+            now,
         )
+        .await
+        .map_err(|error| ApiErrorResponse::with_context(error, &request_ctx))?;
+    #[cfg(not(feature = "audit-log"))]
+    let organization = repository
+        .create_organization_with_owner(&input.name, &input.slug, &AuthUserId(actor.user_id), now)
         .await
         .map_err(|error| ApiErrorResponse::with_context(error, &request_ctx))?;
     Ok(json(organization_response(organization)))
@@ -147,13 +156,27 @@ async fn create_invitation(
         &request_ctx,
     )
     .await?;
+    let now = ctx.clock.now();
+    #[cfg(feature = "audit-log")]
+    let created = repository
+        .create_invitation_audited(
+            &request_ctx,
+            &organization_id,
+            &input.email,
+            &input.role_id,
+            input.expires_at,
+            now,
+        )
+        .await
+        .map_err(|error| ApiErrorResponse::with_context(error, &request_ctx))?;
+    #[cfg(not(feature = "audit-log"))]
     let created = repository
         .create_invitation(
             &organization_id,
             &input.email,
             &input.role_id,
             input.expires_at,
-            ctx.clock.now(),
+            now,
         )
         .await
         .map_err(|error| ApiErrorResponse::with_context(error, &request_ctx))?;
@@ -185,8 +208,16 @@ async fn accept_invitation(
     actor: UserActor,
     Path(token): Path<String>,
 ) -> Result<Json<AcceptInvitationResponse>, ApiErrorResponse> {
-    let membership = PostgresOrganizationRepository::new(ctx.db.clone())
-        .accept_invitation(&token, &AuthUserId(actor.user_id), ctx.clock.now())
+    let repository = PostgresOrganizationRepository::new(ctx.db.clone());
+    let now = ctx.clock.now();
+    #[cfg(feature = "audit-log")]
+    let membership = repository
+        .accept_invitation_audited(&request_ctx, &token, &AuthUserId(actor.user_id), now)
+        .await
+        .map_err(|error| ApiErrorResponse::with_context(error, &request_ctx))?;
+    #[cfg(not(feature = "audit-log"))]
+    let membership = repository
+        .accept_invitation(&token, &AuthUserId(actor.user_id), now)
         .await
         .map_err(|error| ApiErrorResponse::with_context(error, &request_ctx))?;
     Ok(json(AcceptInvitationResponse {

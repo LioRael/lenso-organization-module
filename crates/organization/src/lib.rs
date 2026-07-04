@@ -1,4 +1,6 @@
 pub mod admin;
+#[cfg(feature = "audit-log")]
+pub mod audit;
 pub mod dto;
 pub mod migrations;
 pub mod models;

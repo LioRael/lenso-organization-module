@@ -1,3 +1,9 @@
+#[cfg(feature = "audit-log")]
+use audit_log::migrations::AUDIT_LOG_MIGRATIONS;
+#[cfg(feature = "audit-log")]
+use audit_log::models::AuditEventFilter;
+#[cfg(feature = "audit-log")]
+use audit_log::repositories::PostgresAuditLogRepository;
 use auth::models::{AuthUser, AuthUserId};
 use auth::repositories::{AuthUserRepository, PostgresAuthUserRepository};
 use axum::body::{Body, to_bytes};
@@ -318,6 +324,99 @@ async fn http_routes_create_list_invite_accept_and_deny_without_actor_scopes() {
             .await
             .expect("member invitation permission")
     );
+
+    db.cleanup().await;
+}
+
+#[cfg(feature = "audit-log")]
+#[tokio::test]
+async fn http_routes_write_audit_events_when_audit_feature_is_enabled() {
+    let _ = PostgresOrganizationRepository::create_organization_with_owner_audited;
+    let _ = PostgresOrganizationRepository::create_invitation_audited;
+    let _ = PostgresOrganizationRepository::accept_invitation_audited;
+
+    let Some(db) = migrated_database().await else {
+        return;
+    };
+    apply_migrations(&db.pool, AUDIT_LOG_MIGRATIONS)
+        .await
+        .expect("audit migrations apply");
+
+    seed_user(&db.pool, "usr_audit_owner").await;
+    seed_user(&db.pool, "usr_audit_member").await;
+
+    let app = test_app(&db);
+    let created = request_json(
+        app.clone(),
+        "POST",
+        "/v1/organizations",
+        Some("Bearer dev-user:usr_audit_owner"),
+        Some(json!({ "name": "Audit Route Org", "slug": "audit-route-org" })),
+    )
+    .await;
+    assert_eq!(created.0, StatusCode::OK);
+    let organization_id = created.1["id"]
+        .as_str()
+        .expect("organization id")
+        .to_owned();
+
+    let repo = PostgresOrganizationRepository::new(db.pool.clone());
+    let member_role = repo
+        .member_role_for_organization(&organization_id)
+        .await
+        .expect("member role");
+    let invited = request_json(
+        app.clone(),
+        "POST",
+        &format!("/v1/organizations/{organization_id}/invitations"),
+        Some("Bearer dev-user:usr_audit_owner"),
+        Some(json!({
+            "email": "audit-route-member@example.com",
+            "role_id": member_role.id,
+            "expires_at": (Utc::now() + Duration::days(1)).to_rfc3339(),
+        })),
+    )
+    .await;
+    assert_eq!(invited.0, StatusCode::OK);
+    let token = invited.1["token"]
+        .as_str()
+        .expect("invite token")
+        .to_owned();
+
+    let accepted = request_json(
+        app,
+        "POST",
+        &format!("/v1/organization-invitations/{token}/accept"),
+        Some("Bearer dev-user:usr_audit_member"),
+        None,
+    )
+    .await;
+    assert_eq!(accepted.0, StatusCode::OK);
+
+    let events = PostgresAuditLogRepository::new(db.pool.clone())
+        .list_events(AuditEventFilter {
+            module_name: Some(organization::module::MODULE_NAME.to_owned()),
+            scope_type: Some("organization".to_owned()),
+            scope_id: Some(organization_id),
+            limit: 10,
+            ..AuditEventFilter::default()
+        })
+        .await
+        .expect("audit events");
+    let event_names = events
+        .iter()
+        .map(|event| event.event_name.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(event_names.contains(&"organization.created"));
+    assert!(event_names.contains(&"organization.invitation_created"));
+    assert!(event_names.contains(&"organization.invitation_accepted"));
+    assert!(events.iter().all(|event| {
+        event
+            .correlation_id
+            .as_deref()
+            .is_some_and(|id| !id.is_empty())
+    }));
 
     db.cleanup().await;
 }
