@@ -1,6 +1,11 @@
 use crate::models::{CreatedInvitation, Invitation, Membership, Organization, Role};
+#[cfg(feature = "audit-log")]
+use audit_log::repositories::PostgresAuditLogRepository;
 use auth::public::AuthUserId;
 use chrono::{DateTime, Utc};
+#[cfg(feature = "audit-log")]
+use platform_core::RequestContext;
+use platform_core::db::DbTransaction;
 use platform_core::{AppError, AppResult, DbPool, ErrorCode};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -39,77 +44,33 @@ impl PostgresOrganizationRepository {
         owner_auth_user_id: &AuthUserId,
         now: DateTime<Utc>,
     ) -> AppResult<Organization> {
-        let name = required_trimmed(name, "name")?;
-        let slug = required_trimmed(slug, "slug")?;
-        let organization_id = new_id("org");
-        let owner_role_id = new_id("org_role");
-        let admin_role_id = new_id("org_role");
-        let member_role_id = new_id("org_role");
-        let membership_id = new_id("org_member");
         let mut tx = self.pool.begin().await.map_err(map_sql_error)?;
+        let organization =
+            create_organization_with_owner_in_tx(&mut tx, name, slug, owner_auth_user_id, now)
+                .await?;
+        tx.commit().await.map_err(map_sql_error)?;
+        Ok(organization)
+    }
 
-        let organization = sqlx::query_as::<_, OrganizationRow>(
-            r#"
-            insert into organization.organizations (id, name, slug, created_at, updated_at, archived_at)
-            values ($1, $2, $3, $4, $4, null)
-            returning id, name, slug, created_at, updated_at, archived_at
-            "#,
-        )
-        .bind(&organization_id)
-        .bind(name)
-        .bind(slug)
-        .bind(now)
-        .fetch_one(&mut *tx)
-        .await
-        .map(organization_from_row)
-        .map_err(map_sql_error)?;
-
-        insert_role(
-            &mut tx,
-            &owner_role_id,
-            &organization_id,
-            "owner",
-            OWNER_PERMISSIONS,
-            Some("owner"),
-            now,
-        )
-        .await?;
-        insert_role(
-            &mut tx,
-            &admin_role_id,
-            &organization_id,
-            "admin",
-            ADMIN_PERMISSIONS,
-            Some("admin"),
-            now,
-        )
-        .await?;
-        insert_role(
-            &mut tx,
-            &member_role_id,
-            &organization_id,
-            "member",
-            MEMBER_PERMISSIONS,
-            Some("member"),
-            now,
-        )
-        .await?;
-
-        sqlx::query(
-            r#"
-            insert into organization.memberships (id, organization_id, auth_user_id, role_id, created_at, updated_at, removed_at)
-            values ($1, $2, $3, $4, $5, $5, null)
-            "#,
-        )
-        .bind(&membership_id)
-        .bind(&organization_id)
-        .bind(&owner_auth_user_id.0)
-        .bind(&owner_role_id)
-        .bind(now)
-        .execute(&mut *tx)
-        .await
-        .map_err(map_sql_error)?;
-
+    #[cfg(feature = "audit-log")]
+    pub async fn create_organization_with_owner_audited(
+        &self,
+        request_ctx: &RequestContext,
+        name: &str,
+        slug: &str,
+        owner_auth_user_id: &AuthUserId,
+        now: DateTime<Utc>,
+    ) -> AppResult<Organization> {
+        let mut tx = self.pool.begin().await.map_err(map_sql_error)?;
+        let organization =
+            create_organization_with_owner_in_tx(&mut tx, name, slug, owner_auth_user_id, now)
+                .await?;
+        PostgresAuditLogRepository::new(self.pool.clone())
+            .record_event_in_tx(
+                &mut tx,
+                crate::audit::organization_created(request_ctx, &organization, now),
+            )
+            .await?;
         tx.commit().await.map_err(map_sql_error)?;
         Ok(organization)
     }
@@ -296,6 +257,31 @@ impl PostgresOrganizationRepository {
         Ok(CreatedInvitation { invitation, token })
     }
 
+    #[cfg(feature = "audit-log")]
+    pub async fn create_invitation_audited(
+        &self,
+        request_ctx: &RequestContext,
+        organization_id: &str,
+        email: &str,
+        role_id: &str,
+        expires_at: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> AppResult<CreatedInvitation> {
+        let created = self
+            .create_invitation(organization_id, email, role_id, expires_at, now)
+            .await?;
+        let audit_repository = PostgresAuditLogRepository::new(self.pool.clone());
+        record_best_effort(
+            audit_repository.record_event(crate::audit::invitation_created(
+                request_ctx,
+                &created,
+                now,
+            )),
+        )
+        .await;
+        Ok(created)
+    }
+
     pub async fn accept_invitation(
         &self,
         token: &str,
@@ -374,6 +360,27 @@ impl PostgresOrganizationRepository {
         .map_err(map_sql_error)?;
 
         tx.commit().await.map_err(map_sql_error)?;
+        Ok(membership)
+    }
+
+    #[cfg(feature = "audit-log")]
+    pub async fn accept_invitation_audited(
+        &self,
+        request_ctx: &RequestContext,
+        token: &str,
+        auth_user_id: &AuthUserId,
+        now: DateTime<Utc>,
+    ) -> AppResult<Membership> {
+        let membership = self.accept_invitation(token, auth_user_id, now).await?;
+        let audit_repository = PostgresAuditLogRepository::new(self.pool.clone());
+        record_best_effort(
+            audit_repository.record_event(crate::audit::invitation_accepted(
+                request_ctx,
+                &membership,
+                now,
+            )),
+        )
+        .await;
         Ok(membership)
     }
 
@@ -723,6 +730,86 @@ impl PostgresOrganizationRepository {
     }
 }
 
+async fn create_organization_with_owner_in_tx(
+    tx: &mut DbTransaction<'_>,
+    name: &str,
+    slug: &str,
+    owner_auth_user_id: &AuthUserId,
+    now: DateTime<Utc>,
+) -> AppResult<Organization> {
+    let name = required_trimmed(name, "name")?;
+    let slug = required_trimmed(slug, "slug")?;
+    let organization_id = new_id("org");
+    let owner_role_id = new_id("org_role");
+    let admin_role_id = new_id("org_role");
+    let member_role_id = new_id("org_role");
+    let membership_id = new_id("org_member");
+
+    let organization = sqlx::query_as::<_, OrganizationRow>(
+        r"
+        insert into organization.organizations (id, name, slug, created_at, updated_at, archived_at)
+        values ($1, $2, $3, $4, $4, null)
+        returning id, name, slug, created_at, updated_at, archived_at
+        ",
+    )
+    .bind(&organization_id)
+    .bind(name)
+    .bind(slug)
+    .bind(now)
+    .fetch_one(&mut **tx)
+    .await
+    .map(organization_from_row)
+    .map_err(map_sql_error)?;
+
+    insert_role(
+        tx,
+        &owner_role_id,
+        &organization_id,
+        "owner",
+        OWNER_PERMISSIONS,
+        Some("owner"),
+        now,
+    )
+    .await?;
+    insert_role(
+        tx,
+        &admin_role_id,
+        &organization_id,
+        "admin",
+        ADMIN_PERMISSIONS,
+        Some("admin"),
+        now,
+    )
+    .await?;
+    insert_role(
+        tx,
+        &member_role_id,
+        &organization_id,
+        "member",
+        MEMBER_PERMISSIONS,
+        Some("member"),
+        now,
+    )
+    .await?;
+
+    sqlx::query(
+        r"
+        insert into organization.memberships (id, organization_id, auth_user_id, role_id, created_at, updated_at, removed_at)
+        values ($1, $2, $3, $4, $5, $5, null)
+        ",
+    )
+    .bind(&membership_id)
+    .bind(&organization_id)
+    .bind(&owner_auth_user_id.0)
+    .bind(&owner_role_id)
+    .bind(now)
+    .execute(&mut **tx)
+    .await
+    .map_err(map_sql_error)?;
+
+    Ok(organization)
+}
+
 async fn insert_role(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     id: &str,
@@ -748,6 +835,15 @@ async fn insert_role(
     .await
     .map(|_| ())
     .map_err(map_sql_error)
+}
+
+#[cfg(feature = "audit-log")]
+async fn record_best_effort(
+    recording: impl std::future::Future<Output = AppResult<audit_log::models::AuditEvent>>,
+) {
+    if let Err(_error) = recording.await {
+        // Proof audit events must not fail an already-committed business operation.
+    }
 }
 
 type OrganizationRow = (
@@ -984,4 +1080,18 @@ fn map_sql_error(error: sqlx::Error) -> AppError {
         }
     }
     AppError::new(ErrorCode::Internal, error.to_string())
+}
+
+#[cfg(all(test, feature = "audit-log"))]
+mod tests {
+    use super::*;
+    use std::future::ready;
+
+    #[tokio::test]
+    async fn audit_proof_event_recording_is_best_effort() {
+        record_best_effort(ready(Err::<audit_log::models::AuditEvent, _>(
+            AppError::new(ErrorCode::Internal, "audit unavailable"),
+        )))
+        .await;
+    }
 }

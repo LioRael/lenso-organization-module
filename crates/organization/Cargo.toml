@@ -15,7 +15,12 @@ rust-version.workspace = true
 name = "organization"
 path = "src/lib.rs"
 
+[features]
+default = []
+audit-log = ["dep:audit-log"]
+
 [dependencies]
+audit-log = { workspace = true, optional = true }
 async-trait.workspace = true
 auth.workspace = true
 axum.workspace = true
