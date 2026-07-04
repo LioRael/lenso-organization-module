@@ -14,6 +14,14 @@ jobs:
       - name: Checkout organization module
         uses: actions/checkout@v4
 
+      - name: Checkout audit log module
+        run: |
+          git clone --depth 1 https://github.com/LioRael/lenso-audit-log-module.git ../lenso-audit-log-module
+          if [ ! -d ../lenso-audit-log-module/crates/audit-log ]; then
+            git -C ../lenso-audit-log-module fetch --depth 1 origin feat/audit-log-module
+            git -C ../lenso-audit-log-module checkout FETCH_HEAD
+          fi
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -23,4 +31,4 @@ jobs:
         run: |
           cargo fmt --all --check
           cargo test --locked -p lenso-module-organization
-
+          cargo test --locked -p lenso-module-organization --features audit-log
