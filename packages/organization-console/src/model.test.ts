@@ -9,7 +9,7 @@ import {
   organizationSummary,
   roleRows,
   rolesForOrganization,
-} from "./model.js";
+} from "./model";
 
 describe("organization console model", () => {
   test("formats organization rows and summary", () => {

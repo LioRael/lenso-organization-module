@@ -1,7 +1,7 @@
 import type { ConsolePackageManifest } from "@lenso/runtime-console-api";
 import { defineConsolePackageManifest } from "@lenso/runtime-console-api";
 
-import consoleSurface from "../console-surface.json" with { type: "json" };
+import consoleSurface from "../console-surface.json";
 
 type OrganizationConsolePackageManifest = {
   readonly exportName: "organizationConsoleModule";

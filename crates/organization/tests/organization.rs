@@ -1,3 +1,9 @@
+#[cfg(feature = "audit-log")]
+use audit_log::migrations::AUDIT_LOG_MIGRATIONS;
+#[cfg(feature = "audit-log")]
+use audit_log::models::AuditEventFilter;
+#[cfg(feature = "audit-log")]
+use audit_log::repositories::PostgresAuditLogRepository;
 use auth::models::{AuthUser, AuthUserId};
 use auth::repositories::{AuthUserRepository, PostgresAuthUserRepository};
 use axum::body::{Body, to_bytes};
@@ -98,10 +104,15 @@ async fn admin_data_and_actions_hide_token_hash_and_keep_terminal_records_visibl
         .member_role_for_organization(&organization.id)
         .await
         .expect("member role");
-    let owner_role = repo
-        .owner_role_for_organization(&organization.id)
+    let admin_role = repo
+        .create_role(
+            &organization.id,
+            "admin",
+            &[ORGANIZATION_MANAGE.to_owned()],
+            now,
+        )
         .await
-        .expect("owner role");
+        .expect("admin role");
 
     let created = admin
         .invoke(
@@ -142,7 +153,7 @@ async fn admin_data_and_actions_hide_token_hash_and_keep_terminal_records_visibl
             "update_member_role",
             json!({
                 "membership_id": membership.id,
-                "role_id": owner_role.id,
+                "role_id": admin_role.id,
             }),
         )
         .await
@@ -203,6 +214,95 @@ async fn admin_data_and_actions_hide_token_hash_and_keep_terminal_records_visibl
         .expect("revoked invitation");
     assert!(revoked_record["revoked_at"].as_str().is_some());
     assert!(revoked_record.get("token_hash").is_none());
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn member_role_updates_protect_owner_memberships() {
+    let Some(db) = migrated_database().await else {
+        return;
+    };
+
+    seed_user(&db.pool, "usr_owner_protected").await;
+    seed_user(&db.pool, "usr_regular_member").await;
+
+    let now = Utc::now();
+    let owner = AuthUserId("usr_owner_protected".to_owned());
+    let repo = Arc::new(PostgresOrganizationRepository::new(db.pool.clone()));
+    let organization = repo
+        .create_organization_with_owner("Protected Org", "protected-org", &owner, now)
+        .await
+        .expect("organization created");
+    let member_role = repo
+        .member_role_for_organization(&organization.id)
+        .await
+        .expect("member role");
+    let owner_role = repo
+        .owner_role_for_organization(&organization.id)
+        .await
+        .expect("owner role");
+    let invitation = repo
+        .create_invitation(
+            &organization.id,
+            "regular@example.com",
+            &member_role.id,
+            now + Duration::days(1),
+            now,
+        )
+        .await
+        .expect("invitation created");
+    let member = repo
+        .accept_invitation(
+            &invitation.token,
+            &AuthUserId("usr_regular_member".to_owned()),
+            now,
+        )
+        .await
+        .expect("invitation accepted");
+    let owner_membership = repo
+        .list_members(&organization.id)
+        .await
+        .expect("members")
+        .into_iter()
+        .find(|membership| membership.auth_user_id == owner)
+        .expect("owner membership");
+
+    let rejected_promotion = repo
+        .update_member_role(&member.id, &owner_role.id, now)
+        .await
+        .expect_err("member management cannot assign owner role");
+    assert!(
+        rejected_promotion
+            .to_string()
+            .contains("owner role cannot be assigned")
+    );
+
+    let rejected_owner_role_change = repo
+        .update_member_role(&owner_membership.id, &member_role.id, now)
+        .await
+        .expect_err("owner membership role cannot be changed");
+    assert!(
+        rejected_owner_role_change
+            .to_string()
+            .contains("owner membership role cannot be changed")
+    );
+
+    let rejected_owner_removal = repo
+        .remove_member(&owner_membership.id, now)
+        .await
+        .expect_err("owner membership cannot be removed");
+    assert!(
+        rejected_owner_removal
+            .to_string()
+            .contains("owner membership cannot be removed")
+    );
+
+    assert!(
+        repo.has_permission(&organization.id, &owner, ORGANIZATION_MANAGE)
+            .await
+            .expect("owner permission remains")
+    );
 
     db.cleanup().await;
 }
@@ -318,6 +418,100 @@ async fn http_routes_create_list_invite_accept_and_deny_without_actor_scopes() {
             .await
             .expect("member invitation permission")
     );
+
+    db.cleanup().await;
+}
+
+#[cfg(feature = "audit-log")]
+#[tokio::test]
+async fn http_routes_write_audit_events_when_audit_feature_is_enabled() {
+    let _ = PostgresOrganizationRepository::create_organization_with_owner_audited;
+    let _ = PostgresOrganizationRepository::create_invitation_audited;
+    let _ = PostgresOrganizationRepository::accept_invitation_audited;
+
+    // Host composition must install/apply the audit-log module; this test does so manually.
+    let Some(db) = migrated_database().await else {
+        return;
+    };
+    apply_migrations(&db.pool, AUDIT_LOG_MIGRATIONS)
+        .await
+        .expect("audit migrations apply");
+
+    seed_user(&db.pool, "usr_audit_owner").await;
+    seed_user(&db.pool, "usr_audit_member").await;
+
+    let app = test_app(&db);
+    let created = request_json(
+        app.clone(),
+        "POST",
+        "/v1/organizations",
+        Some("Bearer dev-user:usr_audit_owner"),
+        Some(json!({ "name": "Audit Route Org", "slug": "audit-route-org" })),
+    )
+    .await;
+    assert_eq!(created.0, StatusCode::OK);
+    let organization_id = created.1["id"]
+        .as_str()
+        .expect("organization id")
+        .to_owned();
+
+    let repo = PostgresOrganizationRepository::new(db.pool.clone());
+    let member_role = repo
+        .member_role_for_organization(&organization_id)
+        .await
+        .expect("member role");
+    let invited = request_json(
+        app.clone(),
+        "POST",
+        &format!("/v1/organizations/{organization_id}/invitations"),
+        Some("Bearer dev-user:usr_audit_owner"),
+        Some(json!({
+            "email": "audit-route-member@example.com",
+            "role_id": member_role.id,
+            "expires_at": (Utc::now() + Duration::days(1)).to_rfc3339(),
+        })),
+    )
+    .await;
+    assert_eq!(invited.0, StatusCode::OK);
+    let token = invited.1["token"]
+        .as_str()
+        .expect("invite token")
+        .to_owned();
+
+    let accepted = request_json(
+        app,
+        "POST",
+        &format!("/v1/organization-invitations/{token}/accept"),
+        Some("Bearer dev-user:usr_audit_member"),
+        None,
+    )
+    .await;
+    assert_eq!(accepted.0, StatusCode::OK);
+
+    let events = PostgresAuditLogRepository::new(db.pool.clone())
+        .list_events(AuditEventFilter {
+            module_name: Some(organization::module::MODULE_NAME.to_owned()),
+            scope_type: Some("organization".to_owned()),
+            scope_id: Some(organization_id),
+            limit: 10,
+            ..AuditEventFilter::default()
+        })
+        .await
+        .expect("audit events");
+    let event_names = events
+        .iter()
+        .map(|event| event.event_name.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(event_names.contains(&"organization.created"));
+    assert!(event_names.contains(&"organization.invitation_created"));
+    assert!(event_names.contains(&"organization.invitation_accepted"));
+    assert!(events.iter().all(|event| {
+        event
+            .correlation_id
+            .as_deref()
+            .is_some_and(|id| !id.is_empty())
+    }));
 
     db.cleanup().await;
 }
@@ -444,6 +638,7 @@ async fn archived_organizations_reject_invitations_memberships_and_role_updates(
 
     seed_user(&db.pool, "usr_archive_owner").await;
     seed_user(&db.pool, "usr_archive_invited").await;
+    seed_user(&db.pool, "usr_archive_member").await;
 
     let now = Utc::now();
     let owner = AuthUserId("usr_archive_owner".to_owned());
@@ -466,6 +661,24 @@ async fn archived_organizations_reject_invitations_memberships_and_role_updates(
         )
         .await
         .expect("pre-archive invitation");
+    let membership_invitation = repo
+        .create_invitation(
+            &organization.id,
+            "member-before-archive@example.com",
+            &member_role.id,
+            now + Duration::days(1),
+            now,
+        )
+        .await
+        .expect("pre-archive membership invitation");
+    let membership = repo
+        .accept_invitation(
+            &membership_invitation.token,
+            &AuthUserId("usr_archive_member".to_owned()),
+            now,
+        )
+        .await
+        .expect("pre-archive membership accepted");
     let custom_role = repo
         .create_role(
             &organization.id,
@@ -526,6 +739,26 @@ async fn archived_organizations_reject_invitations_memberships_and_role_updates(
         .expect_err("archived organization rejects role permission updates");
     assert!(
         rejected_role_update
+            .to_string()
+            .contains("organization is archived")
+    );
+
+    let rejected_member_update = repo
+        .update_member_role(&membership.id, &custom_role.id, now)
+        .await
+        .expect_err("archived organization rejects member role updates");
+    assert!(
+        rejected_member_update
+            .to_string()
+            .contains("organization is archived")
+    );
+
+    let rejected_member_removal = repo
+        .remove_member(&membership.id, now)
+        .await
+        .expect_err("archived organization rejects member removal");
+    assert!(
+        rejected_member_removal
             .to_string()
             .contains("organization is archived")
     );

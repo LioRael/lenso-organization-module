@@ -73,6 +73,30 @@ The Console workspace exposes:
 Security note: invitation tokens are stored only as hashes in Postgres. The
 Console never lists `token_hash`, and this module still does not send email.
 
+## Optional Audit Log Integration
+
+`organization` can write audit events when built with the `audit-log` feature
+and installed beside `lenso-module-audit-log`.
+
+```toml
+lenso-module-organization = { version = "0.1.0", features = ["audit-log"] }
+lenso-module-audit-log = "0.1.0"
+```
+
+The integration records organization-created, invitation-created, and
+invitation-accepted events from the HTTP route path. Events use generic audit
+scopes:
+
+```text
+scope_module = organization
+scope_type = organization
+scope_id = <organization id>
+```
+
+The audit module does not depend on organization internals. Publish
+`lenso-module-audit-log` before publishing an `organization` release that enables
+the feature.
+
 ## Basic Usage
 
 Create an organization and make an auth user its owner:

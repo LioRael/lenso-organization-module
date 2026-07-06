@@ -1,9 +1,8 @@
 import { defineConsoleModule } from "@lenso/runtime-console-api";
 
-// @ts-expect-error Vite handles CSS side-effect imports for console packages.
 import "./styles.css";
-import { organizationConsoleManifest } from "./manifest.js";
-import { OrganizationConsolePage } from "./page.js";
+import { organizationConsoleManifest } from "./manifest";
+import { OrganizationConsolePage } from "./page";
 
 export const organizationConsoleModule = defineConsoleModule({
   id: organizationConsoleManifest.id,
@@ -17,5 +16,5 @@ export const organizationConsoleModule = defineConsoleModule({
   })),
 });
 
-export { organizationConsoleManifest } from "./manifest.js";
-export { OrganizationConsolePage } from "./page.js";
+export { organizationConsoleManifest } from "./manifest";
+export { OrganizationConsolePage } from "./page";

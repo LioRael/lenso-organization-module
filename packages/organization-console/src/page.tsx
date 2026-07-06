@@ -18,7 +18,7 @@ import {
   type OrganizationRow,
   type OrganizationSummary,
   type RoleRow,
-} from "./model.js";
+} from "./model";
 
 type AdminActionResponseLike = { data?: unknown };
 type AdminActionMutationOptions = {

@@ -1,7 +1,10 @@
 import { describe, expect, test } from "vitest";
 
-// @ts-expect-error Vitest resolves this package-root test import.
-import { OrganizationConsolePage, organizationConsoleManifest, organizationConsoleModule } from ".";
+import {
+  OrganizationConsolePage,
+  organizationConsoleManifest,
+  organizationConsoleModule,
+} from ".";
 
 describe("organization console package", () => {
   test("declares the organization console package contract and module export", () => {
