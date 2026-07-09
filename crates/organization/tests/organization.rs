@@ -242,6 +242,63 @@ async fn member_role_updates_protect_owner_memberships() {
         .owner_role_for_organization(&organization.id)
         .await
         .expect("owner role");
+    let rejected_owner_invitation = repo
+        .create_invitation(
+            &organization.id,
+            "owner-invitation@example.com",
+            &owner_role.id,
+            now + Duration::days(1),
+            now,
+        )
+        .await
+        .expect_err("invitations cannot assign the owner role");
+    assert!(
+        rejected_owner_invitation
+            .to_string()
+            .contains("owner role cannot be assigned through invitations")
+    );
+
+    let legacy_token = "legacy-owner-invitation-token";
+    sqlx::query(
+        r#"
+        insert into organization.invitations (
+            id, organization_id, email, role_id, token_hash, expires_at,
+            created_at, updated_at, accepted_at, revoked_at
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $7, null, null)
+        "#,
+    )
+    .bind("org_invite_legacy_owner")
+    .bind(&organization.id)
+    .bind("legacy-owner@example.com")
+    .bind(&owner_role.id)
+    .bind(organization::repositories::token_hash(legacy_token))
+    .bind(now + Duration::days(1))
+    .bind(now)
+    .execute(&db.pool)
+    .await
+    .expect("seed legacy owner invitation");
+    let rejected_legacy_acceptance = repo
+        .accept_invitation(
+            legacy_token,
+            &AuthUserId("usr_regular_member".to_owned()),
+            now,
+        )
+        .await
+        .expect_err("legacy owner invitation cannot create an owner membership");
+    assert!(
+        rejected_legacy_acceptance
+            .to_string()
+            .contains("owner role cannot be assigned through invitations")
+    );
+    assert!(
+        !repo
+            .list_members(&organization.id)
+            .await
+            .expect("members")
+            .iter()
+            .any(|membership| membership.auth_user_id.0 == "usr_regular_member")
+    );
     let invitation = repo
         .create_invitation(
             &organization.id,

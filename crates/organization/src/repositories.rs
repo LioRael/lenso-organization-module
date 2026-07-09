@@ -229,6 +229,7 @@ impl PostgresOrganizationRepository {
                 "role does not belong to organization",
             ));
         }
+        ensure_assignable_membership_role(&role)?;
         let invitation_id = new_id("org_invite");
         let token = new_id("org_inv_token");
         let token_hash = token_hash(&token);
@@ -327,6 +328,16 @@ impl PostgresOrganizationRepository {
                 "organization is archived",
             ));
         }
+        let role = sqlx::query_as::<_, RoleRow>(
+            "select id, organization_id, name, permissions, system_key, created_at, updated_at from organization.roles where id = $1",
+        )
+        .bind(&invitation.role_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_sql_error)?
+        .map(role_from_row)
+        .ok_or_else(|| AppError::new(ErrorCode::NotFound, "invitation role not found"))?;
+        ensure_assignable_membership_role(&role)?;
 
         let membership_id = new_id("org_member");
         let membership = sqlx::query_as::<_, MembershipRow>(
@@ -967,6 +978,16 @@ fn role_from_row(row: RoleRow) -> Role {
         created_at,
         updated_at,
     }
+}
+
+fn ensure_assignable_membership_role(role: &Role) -> AppResult<()> {
+    if role.system_key.as_deref() == Some("owner") {
+        return Err(AppError::new(
+            ErrorCode::Validation,
+            "owner role cannot be assigned through invitations",
+        ));
+    }
+    Ok(())
 }
 
 fn membership_from_row(row: MembershipRow) -> Membership {
