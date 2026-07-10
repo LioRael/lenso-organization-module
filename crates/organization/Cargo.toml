@@ -1,6 +1,6 @@
 [package]
 name = "lenso-module-organization"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 license = "MIT"
 description = "First-party organization access module for the Lenso backend framework."

@@ -309,6 +309,7 @@ fn route(
         capability: capability.map(ToOwned::to_owned),
         display_name: Some(display_name.to_owned()),
         story_title: Some(display_name.to_owned()),
+        operation: None,
     }
 }
 
@@ -355,6 +356,7 @@ fn create_organization_action() -> AdminAction {
         }),
         confirmation: None,
         danger_level: AdminActionDangerLevel::Low,
+        operation: None,
     }
 }
 
@@ -384,6 +386,7 @@ fn create_role_action() -> AdminAction {
         }),
         confirmation: None,
         danger_level: AdminActionDangerLevel::Low,
+        operation: None,
     }
 }
 
@@ -406,6 +409,7 @@ fn update_role_permissions_action() -> AdminAction {
         }),
         confirmation: None,
         danger_level: AdminActionDangerLevel::Medium,
+        operation: None,
     }
 }
 
@@ -436,6 +440,7 @@ fn create_invitation_action() -> AdminAction {
         }),
         confirmation: None,
         danger_level: AdminActionDangerLevel::Low,
+        operation: None,
     }
 }
 
@@ -462,6 +467,7 @@ fn string_action(
         }),
         confirmation: None,
         danger_level,
+        operation: None,
     }
 }
 
@@ -487,6 +493,7 @@ fn string_pair_action(
         }),
         confirmation: None,
         danger_level,
+        operation: None,
     }
 }
 
@@ -538,20 +545,72 @@ mod tests {
     fn manifest_declares_console_surfaces() {
         let manifest = manifest();
 
-        assert_eq!(manifest.console, console_surfaces());
         assert_eq!(manifest.console.len(), 4);
-        assert_eq!(manifest.console[0].route, "/data/organization");
-        assert_eq!(manifest.console[1].route, "/data/organization/members");
-        assert_eq!(manifest.console[2].route, "/data/organization/roles");
-        assert_eq!(manifest.console[3].route, "/data/organization/invitations");
-        assert_eq!(
-            manifest.console[0].package.name,
-            "@lenso/organization-console"
+        assert_console_surface(
+            &manifest.console[0],
+            "organizations",
+            "Organizations",
+            "/data/organization",
+            "boxes",
+            ORGANIZATION_READ,
+            70,
         );
-        assert_eq!(
-            manifest.console[0].package.export,
-            "organizationConsoleModule"
+        assert_console_surface(
+            &manifest.console[1],
+            "members",
+            "Members",
+            "/data/organization/members",
+            "users",
+            ORGANIZATION_MEMBERS_MANAGE,
+            80,
         );
+        assert_console_surface(
+            &manifest.console[2],
+            "roles",
+            "Roles",
+            "/data/organization/roles",
+            "shield",
+            ORGANIZATION_ROLES_MANAGE,
+            90,
+        );
+        assert_console_surface(
+            &manifest.console[3],
+            "invitations",
+            "Invitations",
+            "/data/organization/invitations",
+            "key-round",
+            ORGANIZATION_INVITATIONS_MANAGE,
+            100,
+        );
+    }
+
+    fn assert_console_surface(
+        surface: &ConsoleSurface,
+        name: &str,
+        label: &str,
+        route: &str,
+        icon: &str,
+        capability: &str,
+        order: i32,
+    ) {
+        assert_eq!(surface.name, name);
+        assert_eq!(surface.label, label);
+        assert_eq!(surface.area, ConsoleArea::Data);
+        assert_eq!(surface.route, route);
+        assert_eq!(surface.icon.as_deref(), Some(icon));
+        assert_eq!(surface.package.name, "@lenso/organization-console");
+        assert_eq!(surface.package.export, "organizationConsoleModule");
+        assert_eq!(surface.required_capabilities, vec![capability.to_owned()]);
+
+        let navigation = surface
+            .navigation
+            .as_ref()
+            .expect("console surface should declare navigation");
+        assert_eq!(navigation.workspace.id, "organization");
+        assert_eq!(navigation.workspace.label, "Organization");
+        assert_eq!(navigation.workspace.icon.as_deref(), Some("boxes"));
+        assert_eq!(navigation.group, None);
+        assert_eq!(navigation.order, Some(order));
     }
 
     #[test]

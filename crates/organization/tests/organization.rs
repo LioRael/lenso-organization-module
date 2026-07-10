@@ -104,10 +104,15 @@ async fn admin_data_and_actions_hide_token_hash_and_keep_terminal_records_visibl
         .member_role_for_organization(&organization.id)
         .await
         .expect("member role");
-    let owner_role = repo
-        .owner_role_for_organization(&organization.id)
+    let admin_role = repo
+        .create_role(
+            &organization.id,
+            "operators",
+            &[ORGANIZATION_MANAGE.to_owned()],
+            now,
+        )
         .await
-        .expect("owner role");
+        .expect("admin role");
 
     let created = admin
         .invoke(
@@ -148,7 +153,7 @@ async fn admin_data_and_actions_hide_token_hash_and_keep_terminal_records_visibl
             "update_member_role",
             json!({
                 "membership_id": membership.id,
-                "role_id": owner_role.id,
+                "role_id": admin_role.id,
             }),
         )
         .await
@@ -209,6 +214,152 @@ async fn admin_data_and_actions_hide_token_hash_and_keep_terminal_records_visibl
         .expect("revoked invitation");
     assert!(revoked_record["revoked_at"].as_str().is_some());
     assert!(revoked_record.get("token_hash").is_none());
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn member_role_updates_protect_owner_memberships() {
+    let Some(db) = migrated_database().await else {
+        return;
+    };
+
+    seed_user(&db.pool, "usr_owner_protected").await;
+    seed_user(&db.pool, "usr_regular_member").await;
+
+    let now = Utc::now();
+    let owner = AuthUserId("usr_owner_protected".to_owned());
+    let repo = Arc::new(PostgresOrganizationRepository::new(db.pool.clone()));
+    let organization = repo
+        .create_organization_with_owner("Protected Org", "protected-org", &owner, now)
+        .await
+        .expect("organization created");
+    let member_role = repo
+        .member_role_for_organization(&organization.id)
+        .await
+        .expect("member role");
+    let owner_role = repo
+        .owner_role_for_organization(&organization.id)
+        .await
+        .expect("owner role");
+    let rejected_owner_invitation = repo
+        .create_invitation(
+            &organization.id,
+            "owner-invitation@example.com",
+            &owner_role.id,
+            now + Duration::days(1),
+            now,
+        )
+        .await
+        .expect_err("invitations cannot assign the owner role");
+    assert!(
+        rejected_owner_invitation
+            .to_string()
+            .contains("owner role cannot be assigned through invitations")
+    );
+
+    let legacy_token = "legacy-owner-invitation-token";
+    sqlx::query(
+        r#"
+        insert into organization.invitations (
+            id, organization_id, email, role_id, token_hash, expires_at,
+            created_at, updated_at, accepted_at, revoked_at
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $7, null, null)
+        "#,
+    )
+    .bind("org_invite_legacy_owner")
+    .bind(&organization.id)
+    .bind("legacy-owner@example.com")
+    .bind(&owner_role.id)
+    .bind(organization::repositories::token_hash(legacy_token))
+    .bind(now + Duration::days(1))
+    .bind(now)
+    .execute(&db.pool)
+    .await
+    .expect("seed legacy owner invitation");
+    let rejected_legacy_acceptance = repo
+        .accept_invitation(
+            legacy_token,
+            &AuthUserId("usr_regular_member".to_owned()),
+            now,
+        )
+        .await
+        .expect_err("legacy owner invitation cannot create an owner membership");
+    assert!(
+        rejected_legacy_acceptance
+            .to_string()
+            .contains("owner role cannot be assigned through invitations")
+    );
+    assert!(
+        !repo
+            .list_members(&organization.id)
+            .await
+            .expect("members")
+            .iter()
+            .any(|membership| membership.auth_user_id.0 == "usr_regular_member")
+    );
+    let invitation = repo
+        .create_invitation(
+            &organization.id,
+            "regular@example.com",
+            &member_role.id,
+            now + Duration::days(1),
+            now,
+        )
+        .await
+        .expect("invitation created");
+    let member = repo
+        .accept_invitation(
+            &invitation.token,
+            &AuthUserId("usr_regular_member".to_owned()),
+            now,
+        )
+        .await
+        .expect("invitation accepted");
+    let owner_membership = repo
+        .list_members(&organization.id)
+        .await
+        .expect("members")
+        .into_iter()
+        .find(|membership| membership.auth_user_id == owner)
+        .expect("owner membership");
+
+    let rejected_promotion = repo
+        .update_member_role(&member.id, &owner_role.id, now)
+        .await
+        .expect_err("member management cannot assign owner role");
+    assert!(
+        rejected_promotion
+            .to_string()
+            .contains("owner role cannot be assigned")
+    );
+
+    let rejected_owner_role_change = repo
+        .update_member_role(&owner_membership.id, &member_role.id, now)
+        .await
+        .expect_err("owner membership role cannot be changed");
+    assert!(
+        rejected_owner_role_change
+            .to_string()
+            .contains("owner membership role cannot be changed")
+    );
+
+    let rejected_owner_removal = repo
+        .remove_member(&owner_membership.id, now)
+        .await
+        .expect_err("owner membership cannot be removed");
+    assert!(
+        rejected_owner_removal
+            .to_string()
+            .contains("owner membership cannot be removed")
+    );
+
+    assert!(
+        repo.has_permission(&organization.id, &owner, ORGANIZATION_MANAGE)
+            .await
+            .expect("owner permission remains")
+    );
 
     db.cleanup().await;
 }
@@ -544,6 +695,7 @@ async fn archived_organizations_reject_invitations_memberships_and_role_updates(
 
     seed_user(&db.pool, "usr_archive_owner").await;
     seed_user(&db.pool, "usr_archive_invited").await;
+    seed_user(&db.pool, "usr_archive_member").await;
 
     let now = Utc::now();
     let owner = AuthUserId("usr_archive_owner".to_owned());
@@ -566,6 +718,24 @@ async fn archived_organizations_reject_invitations_memberships_and_role_updates(
         )
         .await
         .expect("pre-archive invitation");
+    let membership_invitation = repo
+        .create_invitation(
+            &organization.id,
+            "member-before-archive@example.com",
+            &member_role.id,
+            now + Duration::days(1),
+            now,
+        )
+        .await
+        .expect("pre-archive membership invitation");
+    let membership = repo
+        .accept_invitation(
+            &membership_invitation.token,
+            &AuthUserId("usr_archive_member".to_owned()),
+            now,
+        )
+        .await
+        .expect("pre-archive membership accepted");
     let custom_role = repo
         .create_role(
             &organization.id,
@@ -630,18 +800,40 @@ async fn archived_organizations_reject_invitations_memberships_and_role_updates(
             .contains("organization is archived")
     );
 
+    let rejected_member_update = repo
+        .update_member_role(&membership.id, &custom_role.id, now)
+        .await
+        .expect_err("archived organization rejects member role updates");
+    assert!(
+        rejected_member_update
+            .to_string()
+            .contains("organization is archived")
+    );
+
+    let rejected_member_removal = repo
+        .remove_member(&membership.id, now)
+        .await
+        .expect_err("archived organization rejects member removal");
+    assert!(
+        rejected_member_removal
+            .to_string()
+            .contains("organization is archived")
+    );
+
     db.cleanup().await;
 }
 
 async fn migrated_database() -> Option<TestDatabase> {
     let db = TestDatabase::create().await?;
-    let migrations = PLATFORM_MIGRATIONS
+    let mut migrations = PLATFORM_MIGRATIONS
         .iter()
         .chain(RUNTIME_MIGRATIONS)
         .chain(auth::migrations::AUTH_MIGRATIONS)
         .chain(organization::migrations::ORGANIZATION_MIGRATIONS)
         .copied()
         .collect::<Vec<_>>();
+    #[cfg(feature = "audit-log")]
+    migrations.extend_from_slice(AUDIT_LOG_MIGRATIONS);
     apply_migrations(&db.pool, &migrations)
         .await
         .expect("migrations apply");
@@ -656,6 +848,7 @@ async fn seed_user(pool: &platform_core::DbPool, id: &str) {
             disabled_at: None,
             disabled_reason: None,
             disabled_until: None,
+            is_anonymous: false,
         })
         .await
         .expect("insert auth user");

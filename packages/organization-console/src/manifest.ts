@@ -1,10 +1,16 @@
+import type { ConsolePackageManifest } from "@lenso/runtime-console-api";
 import { defineConsolePackageManifest } from "@lenso/runtime-console-api";
 
 import consoleSurface from "../console-surface.json";
 
-const consoleSurfaceContract = consoleSurface as unknown as {
+type OrganizationConsolePackageManifest = {
   readonly exportName: "organizationConsoleModule";
   readonly id: "organization";
+  readonly bundle: {
+    readonly hostApi: "1";
+    readonly path: "dist/organization-console.js";
+    readonly styles: readonly ["dist/organization-console.css"];
+  };
   readonly packageName: "@lenso/organization-console";
   readonly source: "runtime_bundle";
   readonly surfaces: readonly [
@@ -68,13 +74,18 @@ const consoleSurfaceContract = consoleSurface as unknown as {
           readonly label: "Organization";
         };
       };
-      readonly requiredCapabilities: readonly ["organization.invitations.manage"];
+      readonly requiredCapabilities: readonly [
+        "organization.invitations.manage",
+      ];
       readonly route: "/data/organization/invitations";
       readonly surfaceName: "invitations";
     },
   ];
   readonly version: "workspace";
 };
+
+const consoleSurfaceContract =
+  consoleSurface as unknown as OrganizationConsolePackageManifest satisfies ConsolePackageManifest;
 
 export const organizationConsoleManifest = defineConsolePackageManifest(
   consoleSurfaceContract

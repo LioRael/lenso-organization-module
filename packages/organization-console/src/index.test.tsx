@@ -7,12 +7,13 @@ import {
 } from ".";
 
 describe("organization console package", () => {
-  test("declares an installable organization console package export", () => {
+  test("declares the organization console package contract and module export", () => {
     expect(organizationConsoleManifest).toMatchObject({
       exportName: "organizationConsoleModule",
       id: "organization",
       packageName: "@lenso/organization-console",
       source: "runtime_bundle",
+      version: "workspace",
       surfaces: [
         {
           icon: "boxes",
@@ -39,17 +40,31 @@ describe("organization console package", () => {
           surfaceName: "invitations",
         },
       ],
-      version: "workspace",
     });
+    expect(organizationConsoleManifest.surfaces).toHaveLength(4);
+
     expect(organizationConsoleModule).toMatchObject({
       id: "organization",
       surfaces: [
-        { label: "Organizations", path: "/data/organization" },
-        { label: "Members", path: "/data/organization/members" },
-        { label: "Roles", path: "/data/organization/roles" },
-        { label: "Invitations", path: "/data/organization/invitations" },
+        {
+          label: "Organizations",
+          path: "/data/organization",
+        },
+        {
+          label: "Members",
+          path: "/data/organization/members",
+        },
+        {
+          label: "Roles",
+          path: "/data/organization/roles",
+        },
+        {
+          label: "Invitations",
+          path: "/data/organization/invitations",
+        },
       ],
     });
+    expect(organizationConsoleModule.surfaces).toHaveLength(4);
     expect(OrganizationConsolePage).toBeTypeOf("function");
   });
 });

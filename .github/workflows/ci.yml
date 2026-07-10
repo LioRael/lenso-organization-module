@@ -27,8 +27,26 @@ jobs:
         with:
           components: rustfmt
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Install Console dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Check Rust
         run: |
           cargo fmt --all --check
           cargo test --locked -p lenso-module-organization
           cargo test --locked -p lenso-module-organization --features audit-log
+
+      - name: Check Console
+        run: |
+          pnpm test
+          pnpm typecheck
+          pnpm build
