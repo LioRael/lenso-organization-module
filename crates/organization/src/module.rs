@@ -309,6 +309,7 @@ fn route(
         capability: capability.map(ToOwned::to_owned),
         display_name: Some(display_name.to_owned()),
         story_title: Some(display_name.to_owned()),
+        operation: None,
     }
 }
 
@@ -355,6 +356,7 @@ fn create_organization_action() -> AdminAction {
         }),
         confirmation: None,
         danger_level: AdminActionDangerLevel::Low,
+        operation: None,
     }
 }
 
@@ -384,6 +386,7 @@ fn create_role_action() -> AdminAction {
         }),
         confirmation: None,
         danger_level: AdminActionDangerLevel::Low,
+        operation: None,
     }
 }
 
@@ -406,6 +409,7 @@ fn update_role_permissions_action() -> AdminAction {
         }),
         confirmation: None,
         danger_level: AdminActionDangerLevel::Medium,
+        operation: None,
     }
 }
 
@@ -436,6 +440,7 @@ fn create_invitation_action() -> AdminAction {
         }),
         confirmation: None,
         danger_level: AdminActionDangerLevel::Low,
+        operation: None,
     }
 }
 
@@ -462,6 +467,7 @@ fn string_action(
         }),
         confirmation: None,
         danger_level,
+        operation: None,
     }
 }
 
@@ -487,6 +493,7 @@ fn string_pair_action(
         }),
         confirmation: None,
         danger_level,
+        operation: None,
     }
 }
 

@@ -107,7 +107,7 @@ async fn admin_data_and_actions_hide_token_hash_and_keep_terminal_records_visibl
     let admin_role = repo
         .create_role(
             &organization.id,
-            "admin",
+            "operators",
             &[ORGANIZATION_MANAGE.to_owned()],
             now,
         )
@@ -825,13 +825,15 @@ async fn archived_organizations_reject_invitations_memberships_and_role_updates(
 
 async fn migrated_database() -> Option<TestDatabase> {
     let db = TestDatabase::create().await?;
-    let migrations = PLATFORM_MIGRATIONS
+    let mut migrations = PLATFORM_MIGRATIONS
         .iter()
         .chain(RUNTIME_MIGRATIONS)
         .chain(auth::migrations::AUTH_MIGRATIONS)
         .chain(organization::migrations::ORGANIZATION_MIGRATIONS)
         .copied()
         .collect::<Vec<_>>();
+    #[cfg(feature = "audit-log")]
+    migrations.extend_from_slice(AUDIT_LOG_MIGRATIONS);
     apply_migrations(&db.pool, &migrations)
         .await
         .expect("migrations apply");
@@ -846,6 +848,7 @@ async fn seed_user(pool: &platform_core::DbPool, id: &str) {
             disabled_at: None,
             disabled_reason: None,
             disabled_until: None,
+            is_anonymous: false,
         })
         .await
         .expect("insert auth user");
