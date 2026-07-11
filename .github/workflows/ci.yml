@@ -14,14 +14,6 @@ jobs:
       - name: Checkout organization module
         uses: actions/checkout@v4
 
-      - name: Checkout audit log module
-        run: |
-          git clone --depth 1 https://github.com/LioRael/lenso-audit-log-module.git ../lenso-audit-log-module
-          if [ ! -d ../lenso-audit-log-module/crates/audit-log ]; then
-            git -C ../lenso-audit-log-module fetch --depth 1 origin feat/audit-log-module
-            git -C ../lenso-audit-log-module checkout FETCH_HEAD
-          fi
-
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -50,3 +42,12 @@ jobs:
           pnpm test
           pnpm typecheck
           pnpm build
+
+      - name: Verify reviewed release plan and packages
+        if: ${{ startsWith(github.head_ref, 'release/') }}
+        run: |
+          node scripts/release-plan.mjs --verify
+          jq -r '.packages[].id | select(startswith("cargo:")) | sub("^cargo:"; "")' .lenso-release/plan.json |
+            while read -r package; do cargo package --locked --allow-dirty -p "$package"; done
+          jq -r '.packages[].id | select(startswith("npm:")) | sub("^npm:"; "")' .lenso-release/plan.json |
+            while read -r package; do pnpm --filter "$package" exec npm publish --dry-run --access public --registry https://registry.npmjs.org/; done

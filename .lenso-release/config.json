@@ -1,0 +1,8 @@
+{
+  "schema": "lenso.repository-config.v1",
+  "repository": "LioRael/lenso-organization-module",
+  "ignore": [
+    "@lenso/organization-module-workspace",
+    "npm:@lenso/organization-module-workspace"
+  ]
+}

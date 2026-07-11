@@ -1,18 +1,6 @@
 name: Release
 
-on:
-  workflow_dispatch:
-    inputs:
-      publish_rust_crate:
-        description: Publish lenso-module-organization to crates.io
-        required: true
-        default: false
-        type: boolean
-      publish_npm:
-        description: Publish Runtime Console npm packages
-        required: true
-        default: true
-        type: boolean
+on: [] # Disabled after reviewed publisher adoption; retained until cutover cleanup.
 
 permissions:
   contents: read

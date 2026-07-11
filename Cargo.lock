@@ -1012,6 +1012,8 @@ dependencies = [
 [[package]]
 name = "lenso-module-audit-log"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a7e7125936cc0f2d44d1c3ef9bd43f6b6fff7161a7889979610ebbde8d8a455"
 dependencies = [
  "async-trait",
  "chrono",
