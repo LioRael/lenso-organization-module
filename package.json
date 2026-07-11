@@ -6,6 +6,9 @@
   "scripts": {
     "build": "pnpm --dir packages/organization-console build",
     "check": "pnpm test && pnpm typecheck && pnpm build",
+    "release:intent-check": "node scripts/release-plan.mjs --check-intent",
+    "release:plan": "node scripts/release-plan.mjs",
+    "release:verify": "pnpm check && node scripts/release-plan.mjs --verify",
     "test": "vitest run packages/organization-console/src",
     "typecheck": "tsc -b --pretty false"
   },
@@ -15,6 +18,7 @@
     "@types/node": "^25.9.2",
     "@types/react": "^19.1.0",
     "react": "^19.1.0",
+    "tegami": "1.2.5",
     "typescript": "^6.0.3",
     "vite": "^8.0.16",
     "vitest": "^4.1.7"
