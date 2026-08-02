@@ -1,0 +1,71 @@
+{
+  "schema": "lenso.release-plan.v1",
+  "repository": "LioRael/lenso-organization-module",
+  "sourceCommit": "195425fc6a5e50e46ec3c160bb43a17ec4bbacd9",
+  "tegamiVersion": "1.2.5",
+  "publisher": {
+    "workflow": ".github/workflows/publish.yml",
+    "workflowSha256": "sha256:f36464967259d7be5d5d54972d362f6b75f163866ac3fb0116f6e827f3ba771d",
+    "sharedRevision": "358cbc874ee916736a416c6b6a089d3d948ddbd9",
+    "sharedBundleSha256": "sha256:054ad5e8be4da2f13f0c55707ce6792f73cef4818a2568f19588d48f6cf944d2",
+    "runner": "ubuntu-24.04",
+    "node": "24.18.0",
+    "npm": "11.7.0",
+    "rust": "1.94.0"
+  },
+  "generatedFiles": [
+    {
+      "path": ".tegami/publish-lock.yaml",
+      "sha256": "sha256:5ca606aa7422c1f497d9f7768fa530ede43f6e8b038bb26f353c7e7a41de4c49"
+    },
+    {
+      "path": "Cargo.lock",
+      "sha256": "sha256:0e99f62f6523cbe442552adfa803c344d155ce11cecbdb616d02839b8538ca52"
+    },
+    {
+      "path": "crates/organization/CHANGELOG.md",
+      "sha256": "sha256:be9aa602a5bd331f25d8377fbb7252ebbc9fd4e480cd485ea13ec5803e2a8a55"
+    },
+    {
+      "path": "crates/organization/Cargo.toml",
+      "sha256": "sha256:19f54c2b3123e4139cb492ed230faec1b9e803d2ef6388ced3d6e2c29dc84f27"
+    }
+  ],
+  "packages": [
+    {
+      "id": "cargo:lenso-module-organization",
+      "previousVersion": "0.1.1",
+      "nextVersion": "0.1.2",
+      "bump": "patch",
+      "releaseGroup": "modules",
+      "userFacing": true,
+      "dependencies": [
+        {
+          "id": "cargo:lenso-module-auth",
+          "requirement": "^0.1.8",
+          "resolvedVersion": "0.1.8",
+          "source": "registry"
+        },
+        {
+          "id": "cargo:lenso-platform-core",
+          "requirement": "^0.1.4",
+          "resolvedVersion": "0.1.5",
+          "source": "registry"
+        },
+        {
+          "id": "cargo:lenso-platform-http",
+          "requirement": "^0.1.2",
+          "resolvedVersion": "0.1.4",
+          "source": "registry"
+        },
+        {
+          "id": "cargo:lenso-platform-module",
+          "requirement": "^0.1.2",
+          "resolvedVersion": "0.1.5",
+          "source": "registry"
+        }
+      ]
+    }
+  ],
+  "planId": "sha256:838f867fac5d4f74cf53cadfb0ac8e491020d5f80c1ac55d972b1d18b4c15cbc"
+}
