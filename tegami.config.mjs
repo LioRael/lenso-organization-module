@@ -3,6 +3,5 @@ export default {
   npm: { bumpDep: () => false },
   packages: {
     "lenso-module-organization": {},
-    "@lenso/organization-console": {},
   },
 };

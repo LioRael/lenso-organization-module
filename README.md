@@ -41,27 +41,18 @@ pub fn host_composition() -> HostComposition {
 - Public helpers such as `has_permission` and `accept_invitation`.
 - HTTP routes and schema-admin/admin-action surfaces.
 
-## Runtime Console
+## Business administration
 
-The module declares package-backed Runtime Console surfaces through
-`organization::module::linked_module()`. Install the Rust modules first:
+Organization CRUD is a business administration surface, not a Lenso Console
+System Plane capability. Install the Rust modules in the application that owns
+the business administration experience:
 
 ```sh
 lenso module install auth
 lenso module install organization
 ```
 
-After `@lenso/organization-console` is published, hosts that use Runtime Console
-extensions can install the Console package:
-
-```sh
-pnpm add @lenso/organization-console
-```
-
-For local smoke testing before publication, run `pnpm build` in this repo and
-install or copy the generated bundle into the host extension registry.
-
-The Console workspace exposes:
+The public HTTP and declarative administration contracts expose:
 
 - Organizations: create and archive organizations.
 - Members: inspect memberships, update member roles, and remove members.
@@ -71,7 +62,8 @@ The Console workspace exposes:
   unaccepted invitations.
 
 Security note: invitation tokens are stored only as hashes in Postgres. The
-Console never lists `token_hash`, and this module still does not send email.
+Administration responses never list `token_hash`, and this module still does
+not send email.
 
 ## Optional Audit Log Integration
 
