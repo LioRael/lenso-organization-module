@@ -71,7 +71,7 @@ not send email.
 and installed beside `lenso-module-audit-log`.
 
 ```toml
-lenso-module-organization = { version = "0.1.1", features = ["audit-log"] }
+lenso-module-organization = { version = "0.1.2", features = ["audit-log"] }
 lenso-module-audit-log = "0.1.1"
 ```
 
