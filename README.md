@@ -138,3 +138,10 @@ deliver invitation URLs through their own mail or notification system.
 cargo fmt --all --check
 cargo test --locked -p lenso-module-organization
 ```
+
+## Release
+
+Release-plz opens a release pull request from changes merged to `main` and
+publishes the crate through crates.io Trusted Publishing after that pull
+request is merged. See [`docs/release-process.md`](docs/release-process.md) for
+the repository-owned release contract.
