@@ -440,15 +440,32 @@ fn input(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use platform_module::{AdminSurface, ModuleManifestLintSeverity, ModuleSource};
+    use platform_module::{
+        AdminSurface, ModuleManifestLintSeverity, ModuleRequirement, lint_module_manifest,
+    };
 
     #[test]
     fn manifest_declares_organization_surfaces() {
         let manifest = manifest();
 
-        assert_eq!(manifest.name, MODULE_NAME);
-        assert_eq!(manifest.dependencies, vec![AUTH_MODULE_DEPENDENCY]);
-        assert_eq!(manifest.capabilities, capabilities());
+        assert_eq!(manifest.module_id, format!("lenso/{MODULE_NAME}"));
+        assert_eq!(
+            manifest.requires,
+            vec![
+                ModuleRequirement::new(format!("lenso/{AUTH_MODULE_DEPENDENCY}"), "*",)
+                    .expect("valid auth module requirement")
+            ]
+        );
+        assert_eq!(
+            manifest.capabilities,
+            vec![
+                "organization.invitations.manage",
+                "organization.manage",
+                "organization.members.manage",
+                "organization.read",
+                "organization.roles.manage",
+            ]
+        );
         assert_eq!(manifest.http_routes, http_routes());
         assert_eq!(
             manifest.admin,
@@ -456,7 +473,7 @@ mod tests {
         );
         assert!(manifest.console.is_empty());
 
-        let lints = platform_module::lint_module_manifest(ModuleSource::Linked, &manifest);
+        let lints = lint_module_manifest(&manifest);
         assert!(
             lints
                 .iter()
