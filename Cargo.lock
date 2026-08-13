@@ -2007,6 +2007,8 @@ dependencies = [
 [[package]]
 name = "lenso-module-notification"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d5919d942b78a4890c972fc62ae12ffbeb4d1b21b2f59b0728f3682604c767f"
 dependencies = [
  "aes-gcm",
  "async-trait",
