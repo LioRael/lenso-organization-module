@@ -24,6 +24,9 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt;
 
+#[cfg(feature = "notification")]
+use base64::Engine as _;
+
 #[tokio::test]
 async fn public_helpers_create_seed_roles_and_check_permissions() {
     let Some(db) = migrated_database().await else {
@@ -479,6 +482,294 @@ async fn http_routes_create_list_invite_accept_and_deny_without_actor_scopes() {
     db.cleanup().await;
 }
 
+#[cfg(feature = "notification")]
+#[tokio::test]
+async fn invitation_delivery_is_atomic_idempotent_and_never_returns_the_raw_token() {
+    let Some(db) = migrated_database().await else {
+        return;
+    };
+    seed_user(&db.pool, "usr_delivery_owner").await;
+    let repo = PostgresOrganizationRepository::new(db.pool.clone());
+    let now = Utc::now();
+    let organization = repo
+        .create_organization_with_owner(
+            "Delivery Org",
+            "delivery-org",
+            &AuthUserId("usr_delivery_owner".to_owned()),
+            now,
+        )
+        .await
+        .expect("organization created");
+    let role = repo
+        .member_role_for_organization(&organization.id)
+        .await
+        .expect("member role");
+    let mut request_ctx = platform_core::RequestContext::new(
+        platform_core::RequestId::new("req-delivery-1"),
+        platform_core::CorrelationId::new("corr-delivery-1"),
+    );
+    request_ctx.actor = platform_core::ActorContext::User {
+        user_id: "usr_delivery_owner".to_owned(),
+        scopes: Vec::new(),
+    };
+    request_ctx.causation_id = Some("story-delivery-1".to_owned());
+    let request = organization::public::CreateInvitationDelivery {
+        email: " Member@Example.COM ".to_owned(),
+        role_id: role.id.clone(),
+        expires_at: now + Duration::days(1),
+        locale: "en-US".to_owned(),
+        recipient_display_name: Some("New Member".to_owned()),
+    };
+    let key = base64::engine::general_purpose::STANDARD.encode([7_u8; 32]);
+    let protector = notification::snapshot::EnvironmentSnapshotProtector::from_base64_key(
+        &key,
+        "test:key-7".to_owned(),
+    )
+    .expect("test protector");
+    let first = organization::public::create_invitation_delivery_with_protector(
+        &db.pool,
+        &request_ctx,
+        &organization.id,
+        &request,
+        "invite-member-1",
+        "https://app.example.test/invitations/",
+        now,
+        &protector,
+    )
+    .await
+    .expect("invitation delivery created");
+    assert!(!first.idempotent_replay);
+    assert_eq!(first.delivery_status, "queued");
+
+    let replay = organization::public::create_invitation_delivery_with_protector(
+        &db.pool,
+        &request_ctx,
+        &organization.id,
+        &request,
+        "invite-member-1",
+        "https://app.example.test/invitations/",
+        now,
+        &protector,
+    )
+    .await
+    .expect("same request replays");
+    assert!(replay.idempotent_replay);
+    assert_eq!(replay.invitation_id, first.invitation_id);
+    assert_eq!(
+        replay.notification_delivery_id,
+        first.notification_delivery_id
+    );
+
+    let conflict = organization::public::create_invitation_delivery_with_protector(
+        &db.pool,
+        &request_ctx,
+        &organization.id,
+        &organization::public::CreateInvitationDelivery {
+            email: "different@example.com".to_owned(),
+            ..request.clone()
+        },
+        "invite-member-1",
+        "https://app.example.test/invitations/",
+        now,
+        &protector,
+    )
+    .await
+    .expect_err("same key with different input conflicts");
+    assert_eq!(conflict.code, platform_core::ErrorCode::Conflict);
+
+    let counts: (i64, i64, i64, i64) = sqlx::query_as(
+        r#"
+        select
+            (select count(*) from organization.invitations where id = $1),
+            (select count(*) from notification.intents where id = $2),
+            (select count(*) from notification.render_snapshots),
+            (select count(*) from notification.deliveries where id = $3)
+        "#,
+    )
+    .bind(&first.invitation_id)
+    .bind(&first.notification_intent_id)
+    .bind(&first.notification_delivery_id)
+    .fetch_one(&db.pool)
+    .await
+    .expect("business rows query");
+    assert_eq!(counts, (1, 1, 1, 1));
+
+    let serialized = serde_json::to_string(&first).expect("receipt serializes");
+    assert!(!serialized.contains("org_inv_token"));
+    let token_leaked: bool = sqlx::query_scalar(
+        "select exists(select 1 from notification.intents where recipient_mask like '%org_inv_token%')",
+    )
+    .fetch_one(&db.pool)
+    .await
+    .expect("leak scan");
+    assert!(!token_leaked);
+
+    db.cleanup().await;
+}
+
+#[cfg(feature = "notification")]
+#[tokio::test]
+async fn snapshot_protection_failure_rolls_back_invitation_and_delivery() {
+    let Some(db) = migrated_database().await else {
+        return;
+    };
+    seed_user(&db.pool, "usr_rollback_owner").await;
+    let repo = PostgresOrganizationRepository::new(db.pool.clone());
+    let now = Utc::now();
+    let organization = repo
+        .create_organization_with_owner(
+            "Rollback Org",
+            "rollback-org",
+            &AuthUserId("usr_rollback_owner".to_owned()),
+            now,
+        )
+        .await
+        .expect("organization created");
+    let role = repo
+        .member_role_for_organization(&organization.id)
+        .await
+        .expect("member role");
+    let request_ctx = platform_core::RequestContext::new(
+        platform_core::RequestId::new("req-rollback"),
+        platform_core::CorrelationId::new("corr-rollback"),
+    );
+    #[derive(Debug)]
+    struct RejectingProtector;
+    impl notification::snapshot::SnapshotProtector for RejectingProtector {
+        fn protect(
+            &self,
+            _: &str,
+        ) -> platform_core::AppResult<notification::snapshot::ProtectedValue> {
+            Err(platform_core::AppError::new(
+                platform_core::ErrorCode::Validation,
+                "snapshot protection unavailable",
+            ))
+        }
+
+        fn reveal(
+            &self,
+            _: &notification::snapshot::ProtectedValue,
+        ) -> platform_core::AppResult<String> {
+            unreachable!("rollback test never reveals a snapshot")
+        }
+    }
+
+    let error = organization::public::create_invitation_delivery_with_protector(
+        &db.pool,
+        &request_ctx,
+        &organization.id,
+        &organization::public::CreateInvitationDelivery {
+            email: "rollback@example.com".to_owned(),
+            role_id: role.id,
+            expires_at: now + Duration::days(1),
+            locale: "en-US".to_owned(),
+            recipient_display_name: None,
+        },
+        "rollback-1",
+        "https://app.example.test/invitations/",
+        now,
+        &RejectingProtector,
+    )
+    .await
+    .expect_err("missing snapshot key fails closed");
+    assert_eq!(error.code, platform_core::ErrorCode::Validation);
+    let counts: (i64, i64, i64) = sqlx::query_as(
+        "select (select count(*) from organization.invitations where organization_id = $1), (select count(*) from organization.invitation_delivery_requests where organization_id = $1), (select count(*) from notification.intents where source_entity_id like 'org_invite%')",
+    )
+    .bind(&organization.id)
+    .fetch_one(&db.pool)
+    .await
+    .expect("rollback counts query");
+    assert_eq!(counts, (0, 0, 0));
+    db.cleanup().await;
+}
+
+#[cfg(feature = "notification")]
+#[tokio::test]
+async fn invitation_lifecycle_events_commit_with_the_business_transition() {
+    let Some(db) = migrated_database().await else {
+        return;
+    };
+    seed_user(&db.pool, "usr_lifecycle_owner").await;
+    seed_user(&db.pool, "usr_lifecycle_member").await;
+    let repo = PostgresOrganizationRepository::new(db.pool.clone());
+    let now = Utc::now();
+    let organization = repo
+        .create_organization_with_owner(
+            "Lifecycle Org",
+            "lifecycle-org",
+            &AuthUserId("usr_lifecycle_owner".to_owned()),
+            now,
+        )
+        .await
+        .expect("organization created");
+    let role = repo
+        .member_role_for_organization(&organization.id)
+        .await
+        .expect("member role");
+    let accepted_invitation = repo
+        .create_invitation(
+            &organization.id,
+            "accepted@example.test",
+            &role.id,
+            now + Duration::days(1),
+            now,
+        )
+        .await
+        .expect("accepted invitation created");
+    repo.accept_invitation(
+        &accepted_invitation.token,
+        &AuthUserId("usr_lifecycle_member".to_owned()),
+        now + Duration::minutes(1),
+    )
+    .await
+    .expect("invitation accepted");
+
+    let revoked_invitation = repo
+        .create_invitation(
+            &organization.id,
+            "revoked@example.test",
+            &role.id,
+            now + Duration::days(1),
+            now,
+        )
+        .await
+        .expect("revoked invitation created");
+    assert!(
+        repo.revoke_invitation(
+            &revoked_invitation.invitation.id,
+            now + Duration::minutes(2)
+        )
+        .await
+        .expect("invitation revoked")
+    );
+
+    let lifecycle: Vec<(String, String, String, serde_json::Value)> = sqlx::query_as(
+        r#"
+        select event_name, aggregate_id, correlation_id, payload
+        from platform.outbox
+        where event_name in (
+            'lenso.organization.invitation-accepted.v1',
+            'lenso.organization.invitation-revoked.v1'
+        )
+        order by event_name
+        "#,
+    )
+    .fetch_all(&db.pool)
+    .await
+    .expect("lifecycle events query");
+    assert_eq!(lifecycle.len(), 2);
+    assert_eq!(lifecycle[0].0, "lenso.organization.invitation-accepted.v1");
+    assert_eq!(lifecycle[0].1, accepted_invitation.invitation.id);
+    assert_eq!(lifecycle[0].3["organizationId"], organization.id);
+    assert_eq!(lifecycle[1].0, "lenso.organization.invitation-revoked.v1");
+    assert_eq!(lifecycle[1].1, revoked_invitation.invitation.id);
+    assert_eq!(lifecycle[1].3["organizationId"], organization.id);
+    assert!(lifecycle.iter().all(|event| !event.2.is_empty()));
+
+    db.cleanup().await;
+}
+
 #[cfg(feature = "audit-log")]
 #[tokio::test]
 async fn http_routes_write_audit_events_when_audit_feature_is_enabled() {
@@ -834,6 +1125,8 @@ async fn migrated_database() -> Option<TestDatabase> {
         .collect::<Vec<_>>();
     #[cfg(feature = "audit-log")]
     migrations.extend_from_slice(AUDIT_LOG_MIGRATIONS);
+    #[cfg(feature = "notification")]
+    migrations.extend_from_slice(notification::migrations::NOTIFICATION_MIGRATIONS);
     apply_migrations(&db.pool, &migrations)
         .await
         .expect("migrations apply");

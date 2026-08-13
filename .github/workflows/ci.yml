@@ -10,6 +10,20 @@ jobs:
   check:
     name: Check
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: organization_ci
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d organization_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - name: Checkout organization module
         uses: actions/checkout@v4
@@ -20,8 +34,11 @@ jobs:
           components: rustfmt
 
       - name: Check Rust
+        env:
+          DATABASE_URL: postgres://postgres@127.0.0.1:5432/organization_ci
         run: |
           cargo fmt --all --check
           cargo test --locked -p lenso-module-organization
           cargo test --locked -p lenso-module-organization --features audit-log
+          cargo test --locked -p lenso-module-organization --all-features
           cargo package --locked --no-verify -p lenso-module-organization

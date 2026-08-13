@@ -12,8 +12,11 @@ audit-log = { package = "lenso-module-audit-log", version = "0.1.1" }
 async-trait = "0.1"
 auth = { package = "lenso-module-auth", version = "0.1.13" }
 axum = "0.8"
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 getrandom = "0.4"
+lenso = { version = "0.3.44", features = ["host"] }
+notification = { package = "lenso-module-notification", version = "0.1.0" }
 platform-core = { package = "lenso-platform-core", version = "0.1.22" }
 platform-http = { package = "lenso-platform-http", version = "0.1.21" }
 platform-module = { package = "lenso-platform-module", version = "0.1.22" }
@@ -26,6 +29,8 @@ sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio",
 tokio = { version = "1.52", features = ["macros", "rt-multi-thread"] }
 tower = "0.5"
 utoipa = { version = "5.5", features = ["axum_extras", "chrono", "uuid"] }
+url = "2.5"
+
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

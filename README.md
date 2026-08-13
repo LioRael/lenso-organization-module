@@ -38,6 +38,7 @@ pub fn host_composition() -> HostComposition {
 - Configurable per-organization roles with module-local permission strings.
 - Memberships from `auth.users.id` to organizations.
 - Invitation records with hashed tokens, expiration, acceptance, and revocation.
+- Optional atomic invitation plus transactional-email intent creation.
 - Public helpers such as `has_permission` and `accept_invitation`.
 - HTTP routes and schema-admin/admin-action surfaces.
 
@@ -61,9 +62,37 @@ The public HTTP and declarative administration contracts expose:
 - Invitations: create invitations, copy the raw token returned once, and revoke
   unaccepted invitations.
 
-Security note: invitation tokens are stored only as hashes in Postgres. The
-Administration responses never list `token_hash`, and this module still does
-not send email.
+Security note: invitation tokens are stored only as hashes in Organization
+tables. Administration responses never list `token_hash`. With the optional
+`notification` feature, the token is passed directly into Notification's
+protected immutable render snapshot inside the same database transaction and
+is never returned by the invitation-delivery endpoint.
+
+## Optional Notification Integration
+
+Enable `notification` after installing `lenso-module-notification` to create an
+invitation and its first transactional email intent atomically:
+
+```toml
+lenso-module-organization = { version = "0.1.4", features = ["notification"] }
+lenso-module-notification = "0.1.0"
+```
+
+Configure `organization.public_invitation_base_url` and the Notification
+snapshot protector, then call the idempotent delivery endpoint:
+
+```sh
+curl -X POST /v1/organizations/{organization_id}/invitation-deliveries \
+  -H 'content-type: application/json' \
+  -H 'idempotency-key: invite-member-2026-08-13' \
+  -d '{"email":"member@example.com","role_id":"org_role_...","expires_at":"2026-08-14T00:00:00Z","locale":"en"}'
+```
+
+The response contains invitation, Notification intent, and delivery IDs plus
+the initial delivery status. It never contains the invitation token or URL.
+Reusing the key with identical input returns the same receipt; changed input
+fails with a conflict. The legacy invitation creation endpoint remains for
+applications that intentionally own delivery themselves.
 
 ## Optional Audit Log Integration
 
@@ -128,9 +157,10 @@ let allowed = organization::public::has_permission(
 
 ## Security Notes
 
-Invitation tokens are returned only when an invitation is created. The database
-stores only `token_hash`. This module does not send email; callers should
-deliver invitation URLs through their own mail or notification system.
+The legacy invitation endpoint returns a token only on initial creation. The
+invitation-delivery endpoint never returns one. Organization tables store only
+`token_hash`; Notification stores the rendered invitation URL behind its
+application-layer snapshot protector and excludes it from Console/API output.
 
 ## Development
 

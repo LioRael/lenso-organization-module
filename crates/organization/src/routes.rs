@@ -3,12 +3,16 @@ use crate::dto::{
     CreateOrganizationRequest, MemberListResponse, MemberResponse, OrganizationListResponse,
     OrganizationResponse,
 };
+#[cfg(feature = "notification")]
+use crate::dto::{CreateInvitationDeliveryRequest, CreateInvitationDeliveryResponse};
 use crate::models::{Membership, Organization};
 use crate::module::{ORGANIZATION_INVITATIONS_MANAGE, ORGANIZATION_READ};
 use crate::repositories::PostgresOrganizationRepository;
 use auth::public::AuthUserId;
 use axum::Json;
 use axum::extract::{Path, State};
+#[cfg(feature = "notification")]
+use axum::http::HeaderMap;
 use platform_core::{AppContext, AppError, ErrorCode};
 use platform_http::responses::json;
 use platform_http::{
@@ -17,12 +21,107 @@ use platform_http::{
 };
 
 pub fn router() -> ApiOpenApiRouter {
-    OpenApiRouter::new()
+    let router = OpenApiRouter::new()
         .routes(routes!(create_organization))
         .routes(routes!(list_organizations))
         .routes(routes!(list_members))
         .routes(routes!(create_invitation))
-        .routes(routes!(accept_invitation))
+        .routes(routes!(accept_invitation));
+    #[cfg(feature = "notification")]
+    let router = router.routes(routes!(create_invitation_delivery));
+    router
+}
+
+#[cfg(feature = "notification")]
+#[utoipa::path(
+    post,
+    path = "/v1/organizations/{id}/invitation-deliveries",
+    operation_id = "organization_create_invitation_delivery",
+    tag = "organization",
+    params(
+        ("id" = String, Path, description = "Organization id"),
+        ("Idempotency-Key" = String, Header, description = "Stable request identity")
+    ),
+    request_body(content = CreateInvitationDeliveryRequest, content_type = "application/json"),
+    responses(
+        (status = 200, description = "Invitation and delivery created atomically", body = CreateInvitationDeliveryResponse),
+        (status = 400, description = "Invalid invitation delivery request", body = ErrorResponse),
+        (status = 403, description = "Organization permission is required", body = ErrorResponse),
+        (status = 409, description = "Idempotency conflict", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
+async fn create_invitation_delivery(
+    State(ctx): State<AppContext>,
+    HttpRequestContext(request_ctx): HttpRequestContext,
+    actor: UserActor,
+    Path(organization_id): Path<String>,
+    headers: HeaderMap,
+    JsonBody(input): JsonBody<CreateInvitationDeliveryRequest>,
+) -> Result<Json<CreateInvitationDeliveryResponse>, ApiErrorResponse> {
+    let repository = PostgresOrganizationRepository::new(ctx.db.clone());
+    require_permission(
+        &repository,
+        &organization_id,
+        &actor.user_id,
+        ORGANIZATION_INVITATIONS_MANAGE,
+        &request_ctx,
+    )
+    .await?;
+    let idempotency_key = headers
+        .get(crate::notification::INVITATION_DELIVERY_IDEMPOTENCY_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| {
+            ApiErrorResponse::with_context(
+                AppError::new(ErrorCode::Validation, "Idempotency-Key header is required"),
+                &request_ctx,
+            )
+        })?;
+    let config = ctx
+        .config
+        .module_local_config::<InvitationDeliveryConfig>(crate::module::MODULE_NAME)
+        .map_err(|error| ApiErrorResponse::with_context(error, &request_ctx))?;
+    let public_base_url = config.public_invitation_base_url.ok_or_else(|| {
+        ApiErrorResponse::with_context(
+            AppError::new(
+                ErrorCode::Validation,
+                "organization public_invitation_base_url is not configured",
+            ),
+            &request_ctx,
+        )
+    })?;
+    let receipt = crate::notification::create_invitation_delivery(
+        &repository,
+        &request_ctx,
+        &organization_id,
+        &crate::notification::CreateInvitationDelivery {
+            email: input.email,
+            role_id: input.role_id,
+            expires_at: input.expires_at,
+            locale: input.locale,
+            recipient_display_name: input.recipient_display_name,
+        },
+        idempotency_key,
+        &public_base_url,
+        ctx.clock.now(),
+    )
+    .await
+    .map_err(|error| ApiErrorResponse::with_context(error, &request_ctx))?;
+    Ok(json(CreateInvitationDeliveryResponse {
+        invitation_id: receipt.invitation_id,
+        organization_id: receipt.organization_id,
+        notification_intent_id: receipt.notification_intent_id,
+        notification_delivery_id: receipt.notification_delivery_id,
+        delivery_status: receipt.delivery_status,
+        expires_at: receipt.expires_at,
+        idempotent_replay: receipt.idempotent_replay,
+    }))
+}
+
+#[cfg(feature = "notification")]
+#[derive(Debug, Default, serde::Deserialize)]
+struct InvitationDeliveryConfig {
+    public_invitation_base_url: Option<String>,
 }
 
 #[utoipa::path(
