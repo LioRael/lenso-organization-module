@@ -57,6 +57,34 @@ pub struct CreateInvitationResponse {
     pub expires_at: DateTime<Utc>,
 }
 
+#[cfg(feature = "notification")]
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateInvitationDeliveryRequest {
+    pub email: String,
+    pub role_id: String,
+    pub expires_at: DateTime<Utc>,
+    #[serde(default = "default_locale")]
+    pub locale: String,
+    pub recipient_display_name: Option<String>,
+}
+
+#[cfg(feature = "notification")]
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CreateInvitationDeliveryResponse {
+    pub invitation_id: String,
+    pub organization_id: String,
+    pub notification_intent_id: String,
+    pub notification_delivery_id: String,
+    pub delivery_status: String,
+    pub expires_at: DateTime<Utc>,
+    pub idempotent_replay: bool,
+}
+
+#[cfg(feature = "notification")]
+fn default_locale() -> String {
+    "en-US".to_owned()
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AcceptInvitationResponse {
     pub membership: MemberResponse,

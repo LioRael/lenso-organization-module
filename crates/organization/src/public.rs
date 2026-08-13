@@ -4,6 +4,56 @@ use auth::public::AuthUserId;
 use chrono::{DateTime, Utc};
 use platform_core::{AppResult, DbPool};
 
+#[cfg(feature = "notification")]
+pub use crate::notification::{CreateInvitationDelivery, InvitationDeliveryReceipt};
+
+#[cfg(feature = "notification")]
+pub async fn create_invitation_delivery(
+    pool: &DbPool,
+    request_ctx: &platform_core::RequestContext,
+    organization_id: &str,
+    request: &CreateInvitationDelivery,
+    idempotency_key: &str,
+    public_invitation_base_url: &str,
+    now: DateTime<Utc>,
+) -> AppResult<InvitationDeliveryReceipt> {
+    crate::notification::create_invitation_delivery(
+        &PostgresOrganizationRepository::new(pool.clone()),
+        request_ctx,
+        organization_id,
+        request,
+        idempotency_key,
+        public_invitation_base_url,
+        now,
+    )
+    .await
+}
+
+/// Variant for host-owned secret providers and deterministic integration tests.
+#[cfg(feature = "notification")]
+pub async fn create_invitation_delivery_with_protector(
+    pool: &DbPool,
+    request_ctx: &platform_core::RequestContext,
+    organization_id: &str,
+    request: &CreateInvitationDelivery,
+    idempotency_key: &str,
+    public_invitation_base_url: &str,
+    now: DateTime<Utc>,
+    protector: &dyn notification::snapshot::SnapshotProtector,
+) -> AppResult<InvitationDeliveryReceipt> {
+    crate::notification::create_invitation_delivery_with_protector(
+        &PostgresOrganizationRepository::new(pool.clone()),
+        request_ctx,
+        organization_id,
+        request,
+        idempotency_key,
+        public_invitation_base_url,
+        now,
+        protector,
+    )
+    .await
+}
+
 pub async fn create_organization_with_owner(
     pool: &DbPool,
     name: &str,

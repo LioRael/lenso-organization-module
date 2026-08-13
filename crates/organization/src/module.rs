@@ -18,6 +18,8 @@ use std::sync::Arc;
 
 pub const MODULE_NAME: &str = "organization";
 pub const AUTH_MODULE_DEPENDENCY: &str = "auth";
+#[cfg(feature = "notification")]
+pub const NOTIFICATION_MODULE_DEPENDENCY: &str = "notification";
 pub const ORGANIZATION_READ: &str = "organization.read";
 pub const ORGANIZATION_MANAGE: &str = "organization.manage";
 pub const ORGANIZATION_MEMBERS_MANAGE: &str = "organization.members.manage";
@@ -35,7 +37,8 @@ pub fn capabilities() -> Vec<String> {
 }
 
 pub fn http_routes() -> Vec<ModuleHttpRoute> {
-    vec![
+    #[allow(unused_mut)]
+    let mut routes = vec![
         route(
             ModuleHttpMethod::Post,
             "/v1/organizations",
@@ -66,7 +69,15 @@ pub fn http_routes() -> Vec<ModuleHttpRoute> {
             None,
             "Accept Organization Invitation",
         ),
-    ]
+    ];
+    #[cfg(feature = "notification")]
+    routes.push(route(
+        ModuleHttpMethod::Post,
+        "/v1/organizations/{id}/invitation-deliveries",
+        Some(ORGANIZATION_INVITATIONS_MANAGE),
+        "Create Organization Invitation Delivery",
+    ));
+    routes
 }
 
 pub fn organization_schema() -> AdminSchema {
@@ -187,8 +198,12 @@ pub fn admin_surface() -> AdminDeclarativeSurface {
 }
 
 pub fn manifest() -> ModuleManifest {
+    #[allow(unused_mut)]
+    let mut dependencies = vec![AUTH_MODULE_DEPENDENCY.to_owned()];
+    #[cfg(feature = "notification")]
+    dependencies.push(NOTIFICATION_MODULE_DEPENDENCY.to_owned());
     ModuleManifest::builder(MODULE_NAME)
-        .dependencies(vec![AUTH_MODULE_DEPENDENCY.to_owned()])
+        .dependencies(dependencies)
         .capabilities(capabilities())
         .http_routes(http_routes())
         .declarative_admin(admin_surface())
@@ -449,13 +464,16 @@ mod tests {
         let manifest = manifest();
 
         assert_eq!(manifest.module_id, format!("lenso/{MODULE_NAME}"));
-        assert_eq!(
-            manifest.requires,
-            vec![
-                ModuleRequirement::new(format!("lenso/{AUTH_MODULE_DEPENDENCY}"), "*",)
-                    .expect("valid auth module requirement")
-            ]
+        let mut expected_requirements = vec![
+            ModuleRequirement::new(format!("lenso/{AUTH_MODULE_DEPENDENCY}"), "*")
+                .expect("valid auth module requirement"),
+        ];
+        #[cfg(feature = "notification")]
+        expected_requirements.push(
+            ModuleRequirement::new(format!("lenso/{NOTIFICATION_MODULE_DEPENDENCY}"), "*")
+                .expect("valid notification module requirement"),
         );
+        assert_eq!(manifest.requires, expected_requirements);
         assert_eq!(
             manifest.capabilities,
             vec![

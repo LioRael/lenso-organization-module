@@ -37,6 +37,12 @@ impl PostgresOrganizationRepository {
         Self { pool }
     }
 
+    #[cfg(feature = "notification")]
+    #[must_use]
+    pub(crate) fn pool(&self) -> &DbPool {
+        &self.pool
+    }
+
     pub async fn create_organization_with_owner(
         &self,
         name: &str,
@@ -202,6 +208,23 @@ impl PostgresOrganizationRepository {
         expires_at: DateTime<Utc>,
         now: DateTime<Utc>,
     ) -> AppResult<CreatedInvitation> {
+        let mut tx = self.pool.begin().await.map_err(map_sql_error)?;
+        let (created, _, _) = self
+            .create_invitation_in_tx(&mut tx, organization_id, email, role_id, expires_at, now)
+            .await?;
+        tx.commit().await.map_err(map_sql_error)?;
+        Ok(created)
+    }
+
+    pub(crate) async fn create_invitation_in_tx(
+        &self,
+        tx: &mut DbTransaction<'_>,
+        organization_id: &str,
+        email: &str,
+        role_id: &str,
+        expires_at: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> AppResult<(CreatedInvitation, String, String)> {
         let email = required_trimmed(email, "email")?;
         if expires_at <= now {
             return Err(AppError::new(
@@ -209,9 +232,14 @@ impl PostgresOrganizationRepository {
                 "expires_at must be in the future",
             ));
         }
-        let organization = self
-            .find_organization(organization_id)
-            .await?
+        let organization = sqlx::query_as::<_, OrganizationRow>(
+            "select id, name, slug, created_at, updated_at, archived_at from organization.organizations where id = $1 for update",
+        )
+            .bind(organization_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(map_sql_error)?
+            .map(organization_from_row)
             .ok_or_else(|| AppError::new(ErrorCode::NotFound, "organization not found"))?;
         if organization.archived_at.is_some() {
             return Err(AppError::new(
@@ -219,9 +247,14 @@ impl PostgresOrganizationRepository {
                 "organization is archived",
             ));
         }
-        let role = self
-            .find_role(role_id)
-            .await?
+        let role = sqlx::query_as::<_, RoleRow>(
+            "select id, organization_id, name, permissions, system_key, created_at, updated_at from organization.roles where id = $1",
+        )
+            .bind(role_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(map_sql_error)?
+            .map(role_from_row)
             .ok_or_else(|| AppError::new(ErrorCode::NotFound, "role not found"))?;
         if role.organization_id != organization_id {
             return Err(AppError::new(
@@ -250,12 +283,18 @@ impl PostgresOrganizationRepository {
         .bind(token_hash)
         .bind(expires_at)
         .bind(now)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut **tx)
         .await
         .map(invitation_from_row)
         .map_err(map_sql_error)?;
 
-        Ok(CreatedInvitation { invitation, token })
+        let organization_name = organization.name;
+        let role_name = role.name;
+        Ok((
+            CreatedInvitation { invitation, token },
+            organization_name,
+            role_name,
+        ))
     }
 
     #[cfg(feature = "audit-log")]
@@ -289,6 +328,17 @@ impl PostgresOrganizationRepository {
         auth_user_id: &AuthUserId,
         now: DateTime<Utc>,
     ) -> AppResult<Membership> {
+        self.accept_invitation_with_context(None, token, auth_user_id, now)
+            .await
+    }
+
+    async fn accept_invitation_with_context(
+        &self,
+        request_ctx: Option<&platform_core::RequestContext>,
+        token: &str,
+        auth_user_id: &AuthUserId,
+        now: DateTime<Utc>,
+    ) -> AppResult<Membership> {
         let token = required_trimmed(token, "token")?;
         let token_hash = token_hash(token);
         let mut tx = self.pool.begin().await.map_err(map_sql_error)?;
@@ -308,6 +358,7 @@ impl PostgresOrganizationRepository {
         .map_err(map_sql_error)?
         .map(invitation_from_row)
         .ok_or_else(|| AppError::new(ErrorCode::NotFound, "invitation not found"))?;
+        let invitation_id = invitation.id.clone();
 
         if invitation.expires_at <= now {
             return Err(AppError::new(
@@ -370,6 +421,28 @@ impl PostgresOrganizationRepository {
         .await
         .map_err(map_sql_error)?;
 
+        #[cfg(feature = "notification")]
+        publish_invitation_lifecycle_in_tx(
+            &mut tx,
+            "lenso.organization.invitation-accepted.v1",
+            "acceptedAt",
+            &invitation_id,
+            &invitation.organization_id,
+            now,
+            request_ctx,
+        )
+        .await?;
+
+        #[cfg(feature = "audit-log")]
+        if let Some(request_ctx) = request_ctx {
+            PostgresAuditLogRepository::new(self.pool.clone())
+                .record_event_in_tx(
+                    &mut tx,
+                    crate::audit::invitation_accepted(request_ctx, &membership, now),
+                )
+                .await?;
+        }
+
         tx.commit().await.map_err(map_sql_error)?;
         Ok(membership)
     }
@@ -382,17 +455,8 @@ impl PostgresOrganizationRepository {
         auth_user_id: &AuthUserId,
         now: DateTime<Utc>,
     ) -> AppResult<Membership> {
-        let membership = self.accept_invitation(token, auth_user_id, now).await?;
-        let audit_repository = PostgresAuditLogRepository::new(self.pool.clone());
-        record_best_effort(
-            audit_repository.record_event(crate::audit::invitation_accepted(
-                request_ctx,
-                &membership,
-                now,
-            )),
-        )
-        .await;
-        Ok(membership)
+        self.accept_invitation_with_context(Some(request_ctx), token, auth_user_id, now)
+            .await
     }
 
     pub async fn revoke_invitation(
@@ -400,22 +464,37 @@ impl PostgresOrganizationRepository {
         invitation_id: &str,
         now: DateTime<Utc>,
     ) -> AppResult<bool> {
-        sqlx::query_scalar::<_, String>(
+        let mut tx = self.pool.begin().await.map_err(map_sql_error)?;
+        let revoked = sqlx::query_as::<_, (String, String)>(
             r#"
             update organization.invitations
             set revoked_at = $2, updated_at = $2
             where id = $1
               and accepted_at is null
               and revoked_at is null
-            returning id
+            returning id, organization_id
             "#,
         )
         .bind(invitation_id)
         .bind(now)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
-        .map(|row| row.is_some())
-        .map_err(map_sql_error)
+        .map_err(map_sql_error)?;
+        #[cfg(feature = "notification")]
+        if let Some((invitation_id, organization_id)) = &revoked {
+            publish_invitation_lifecycle_in_tx(
+                &mut tx,
+                "lenso.organization.invitation-revoked.v1",
+                "revokedAt",
+                invitation_id,
+                organization_id,
+                now,
+                None,
+            )
+            .await?;
+        }
+        tx.commit().await.map_err(map_sql_error)?;
+        Ok(revoked.is_some())
     }
 
     pub async fn update_member_role(
@@ -898,6 +977,87 @@ async fn insert_role(
     .await
     .map(|_| ())
     .map_err(map_sql_error)
+}
+
+#[cfg(feature = "notification")]
+async fn publish_invitation_lifecycle_in_tx(
+    tx: &mut DbTransaction<'_>,
+    event_name: &str,
+    observed_field: &str,
+    invitation_id: &str,
+    organization_id: &str,
+    observed_at: DateTime<Utc>,
+    request_ctx: Option<&platform_core::RequestContext>,
+) -> AppResult<()> {
+    use platform_core::{OutboxEvent, OutboxPublisher};
+
+    let event_id = format!(
+        "evt_{}",
+        &hex_digest(&format!(
+            "{event_name}:{invitation_id}:{}",
+            observed_at.to_rfc3339()
+        ))[..32]
+    );
+    let correlation_id = request_ctx.map_or_else(
+        || format!("organization-invitation:{invitation_id}"),
+        |context| context.correlation_id.0.clone(),
+    );
+    let payload = match observed_field {
+        "acceptedAt" => serde_json::json!({
+            "invitationId": invitation_id,
+            "organizationId": organization_id,
+            "acceptedAt": observed_at,
+        }),
+        "revokedAt" => serde_json::json!({
+            "invitationId": invitation_id,
+            "organizationId": organization_id,
+            "revokedAt": observed_at,
+        }),
+        _ => {
+            return Err(AppError::new(
+                ErrorCode::Internal,
+                "unsupported invitation lifecycle",
+            ));
+        }
+    };
+    let headers = request_ctx.map_or_else(
+        || serde_json::json!({}),
+        |context| {
+            serde_json::json!({
+                "actor": context.actor,
+                "tenant_id": context.tenant_id,
+                "trace": context.trace,
+            })
+        },
+    );
+    OutboxPublisher
+        .publish_in_tx(
+            tx,
+            &OutboxEvent {
+                id: event_id,
+                event_name: event_name.to_owned(),
+                event_version: 1,
+                source_module: "organization".to_owned(),
+                aggregate_type: "organization_invitation".to_owned(),
+                aggregate_id: invitation_id.to_owned(),
+                correlation_id,
+                causation_id: request_ctx.and_then(|context| context.causation_id.clone()),
+                occurred_at: observed_at,
+                payload,
+                headers,
+            },
+        )
+        .await
+}
+
+#[cfg(feature = "notification")]
+fn hex_digest(value: &str) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    let mut encoded = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        let _ = write!(&mut encoded, "{byte:02x}");
+    }
+    encoded
 }
 
 #[cfg(feature = "audit-log")]
