@@ -40,6 +40,9 @@ use thiserror::Error;
 use zeroize::Zeroizing;
 
 use crate::schema::schema_plan;
+use lenso_organization_core::{
+    exact_caller, valid_membership_request, valid_name, valid_organization_name, valid_slug,
+};
 
 pub use operator::{OrganizationOperator, OrganizationOperatorError};
 
@@ -243,28 +246,18 @@ impl OrganizationProvider {
     }
 
     fn authorized_admin_caller<'a>(&self, context: &'a InvocationContext) -> Option<&'a str> {
-        context
-            .caller_instance()
-            .filter(|caller| self.admin_callers.iter().any(|allowed| allowed == *caller))
+        exact_caller(context.caller_instance(), &self.admin_callers)
     }
 
     fn authorized_membership_admin_caller<'a>(
         &self,
         context: &'a InvocationContext,
     ) -> Option<&'a str> {
-        context.caller_instance().filter(|caller| {
-            self.membership_admin_callers
-                .iter()
-                .any(|allowed| allowed == *caller)
-        })
+        exact_caller(context.caller_instance(), &self.membership_admin_callers)
     }
 
     fn authorized_directory_caller<'a>(&self, context: &'a InvocationContext) -> Option<&'a str> {
-        context.caller_instance().filter(|caller| {
-            self.directory_callers
-                .iter()
-                .any(|allowed| allowed == *caller)
-        })
+        exact_caller(context.caller_instance(), &self.directory_callers)
     }
 }
 
@@ -1258,33 +1251,6 @@ fn random_id(prefix: &str) -> Result<String, OrganizationError> {
         write!(&mut id, "{byte:02x}").expect("writing to String cannot fail");
     }
     Ok(id)
-}
-
-fn valid_organization_name(value: &str) -> bool {
-    let value = value.trim();
-    !value.is_empty() && value.len() <= 200 && !value.chars().any(char::is_control)
-}
-
-fn valid_slug(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 100
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-        && !value.starts_with('-')
-        && !value.ends_with('-')
-}
-
-fn valid_name(value: &str, max: usize) -> bool {
-    !value.is_empty()
-        && value.len() <= max
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b':'))
-}
-
-fn valid_membership_request(idempotency_key: &str, organization_id: &str, subject: &str) -> bool {
-    valid_name(idempotency_key, 256) && valid_name(organization_id, 256) && valid_name(subject, 256)
 }
 
 fn valid_secret_reference(reference: &str) -> bool {

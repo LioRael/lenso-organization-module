@@ -8,6 +8,7 @@ repository.workspace = true
 description = "PostgreSQL-backed Organization Plugin for Lenso vNext."
 
 [dependencies]
+lenso-organization-core = { version = "0.1.0", path = "../lenso-organization-core" }
 futures.workspace = true
 getrandom.workspace = true
 lenso-capability-organization-admin = { path = "../lenso-capability-organization-admin", version = "0.4.0" }

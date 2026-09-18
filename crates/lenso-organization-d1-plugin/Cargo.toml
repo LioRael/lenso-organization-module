@@ -1,0 +1,33 @@
+[package]
+name = "lenso-organization-d1-plugin"
+version = "0.1.0"
+description = "D1-backed Organization Plugin for Lenso Workers applications."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+lenso-organization-core = { version = "0.1.0", path = "../lenso-organization-core" }
+lenso-capability-organization-admin = { version = "0.4.0", path = "../lenso-capability-organization-admin" }
+lenso-capability-organization-directory = { version = "0.3.0", path = "../lenso-capability-organization-directory" }
+lenso-capability-organization-membership = { version = "0.2.0", path = "../lenso-capability-organization-membership" }
+lenso-capability-organization-membership-admin = { version = "0.3.0", path = "../lenso-capability-organization-membership-admin" }
+lenso-kernel.workspace = true
+lenso-native-adapter.workspace = true
+lenso-migration = "=0.1.0"
+lenso-migration-d1 = "=0.1.0"
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "=0.3.104"
+wasm-bindgen = "=0.2.127"
+wasm-bindgen-futures = "=0.4.77"
+
+[dev-dependencies]
+rusqlite = { version = "0.38", features = ["bundled"] }
+
+[lints]
+workspace = true
