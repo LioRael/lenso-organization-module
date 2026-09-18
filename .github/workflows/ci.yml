@@ -41,4 +41,4 @@ jobs:
         run: cargo test --locked --workspace -- --include-ignored --test-threads=1
 
       - name: Verify the coordinated package release
-        run: cargo package --locked -p lenso-capability-organization-admin -p lenso-capability-organization-directory -p lenso-capability-organization-membership -p lenso-capability-organization-membership-admin -p lenso-organization-postgres-plugin
+        run: cargo package --locked -p lenso-organization-core -p lenso-capability-organization-admin -p lenso-capability-organization-directory -p lenso-capability-organization-membership -p lenso-capability-organization-membership-admin -p lenso-organization-postgres-plugin

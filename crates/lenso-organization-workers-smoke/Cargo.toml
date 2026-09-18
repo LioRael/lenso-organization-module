@@ -1,0 +1,28 @@
+[package]
+name = "lenso-organization-workers-smoke"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+lenso-organization-d1-plugin = { path = "../lenso-organization-d1-plugin" }
+lenso-capability-organization-admin = { path = "../lenso-capability-organization-admin" }
+lenso-capability-organization-membership-admin = { path = "../lenso-capability-organization-membership-admin" }
+lenso-capability-organization-membership = { path = "../lenso-capability-organization-membership" }
+lenso-capability-organization-directory = { path = "../lenso-capability-organization-directory" }
+lenso-kernel.workspace = true
+lenso-native-adapter.workspace = true
+lenso-app-plan = "=0.4.1"
+lenso-workers-driver = "=0.1.0"
+wasm-bindgen = "=0.2.127"
+wasm-bindgen-futures = "=0.4.77"
+js-sys = "=0.3.104"
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/lenso-organization-core",
+    "crates/lenso-organization-d1-plugin",
+    "crates/lenso-organization-workers-smoke",
     "crates/lenso-capability-organization-admin",
     "crates/lenso-capability-organization-directory",
     "crates/lenso-capability-organization-membership",

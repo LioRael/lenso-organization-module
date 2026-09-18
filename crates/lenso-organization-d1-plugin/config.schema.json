@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "binding",
+    "admin_callers"
+  ],
+  "properties": {
+    "admin_callers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "directory_callers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "membership_admin_callers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "binding": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_]{0,127}$"
+    }
+  },
+  "additionalProperties": false
+}
