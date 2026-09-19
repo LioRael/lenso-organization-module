@@ -1,8 +1,9 @@
 # Agent instructions
 
 Before planning, changing, or executing a release, read the repository-owned
-[release process](docs/release-process.md). Do not infer production authority
-from repository write access or bypass registry Trusted Publishing controls.
+[release process](docs/release-process.md) and [contribution contract](CONTRIBUTING.md).
+Do not infer production authority from repository write access or bypass registry
+Trusted Publishing controls. Landing is candidate-first; it is not publication.
 
 ## Agent skills
 

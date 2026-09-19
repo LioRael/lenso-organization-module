@@ -1,5 +1,7 @@
 # Lenso Organization Plugin
 
+Contribution and maintainer landing guidance is in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 First-party Organization membership and PostgreSQL behavior for Lenso vNext. The
 default branch is vNext-only; the former `lenso-module-organization` releases
 remain available through their existing crate versions and Git tags.
@@ -71,11 +73,7 @@ OrganizationOperator::setup(database_url, "organization").await?;
 
 ## Development
 
-```sh
-cargo fmt --all -- --check
-cargo check --locked --workspace --all-targets
-cargo test --locked --workspace
-```
+Run focused checks for the files you change. The candidate CI `check` job is the authoritative full native, PostgreSQL, and package proof; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 PostgreSQL acceptance additionally runs:
 

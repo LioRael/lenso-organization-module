@@ -5,13 +5,13 @@ versions and tags. The default branch now owns vNext packages with different
 identities; it must not republish or overwrite the legacy package.
 
 The four Capability packages and the PostgreSQL Plugin are public release
-artifacts. The composition-only Secrets fixture remains private. Publication
-is manual and must run from a clean `main` checkout through
-`.github/workflows/release-plz.yml`.
+artifacts. Publication is a separate, explicitly authorized operation. The
+repository workflow is manual-only: it has no `main` push trigger and never
+opens or updates a release PR. A normal contribution lands through the
+candidate-first contract in [CONTRIBUTING.md](../CONTRIBUTING.md), not through
+release-plz.
 
-Every push to `main` also asks release-plz to open or update the repository's
-release pull request. Merging that pull request does not publish by itself;
-publication still requires the explicitly confirmed live workflow dispatch.
+## Trusted Publishing boundaries
 
 Before the first publication of a new crate name:
 
@@ -20,20 +20,35 @@ Before the first publication of a new crate name:
 2. make the four Capability packages public before the implementation package;
 3. allocate the name using crates.io's required one-time initial-publish
    process; Trusted Publishing cannot create a new crate name;
-4. configure a crates.io Trusted Publisher for every published crate with
-   owner `LioRael`, repository `lenso-organization-plugin`, and workflow
+4. configure a crates.io Trusted Publisher for every published crate with owner
+   `LioRael`, repository `lenso-organization-plugin`, and workflow
    `release-plz.yml`; and
-5. run the live workflow only after every crate has the matching publisher.
+5. run a separately authorized live workflow only after every crate has the
+   matching publisher.
 
 The workflow never accepts or falls back to a long-lived registry token.
-Release-plz obtains a short-lived crates.io credential from GitHub OIDC, and
-the live job has only the `id-token: write` permission needed for that exchange.
+Release-plz obtains a short-lived crates.io credential from GitHub OIDC, and a
+live job has only the `id-token: write` permission needed for that exchange.
+Repository write access, a landed commit, and a successful dry-run do not grant
+publication authority.
 
-Do not use `--no-verify`, a long-lived registry token, or Git dependencies as a
-publication shortcut.
+## Controlled dispatch
 
-Run a validation-only workflow first. A live run requires `live=true`,
-`confirm=publish`, and the `main` ref. Publish order is:
+Dispatch `.github/workflows/release-plz.yml` from `main` with:
+
+- `mode=dry-run` (the only mode authorized for this rollout);
+- the full landed `source_sha`;
+- the exact successful candidate CI `run_id` and `run_attempt`; and
+- the JSON `release_set` in the documented publication order.
+
+The workflow verifies that `source_sha` is on `main` and that the exact
+candidate `check` run succeeded for that SHA before installing release tooling
+or invoking release-plz. Dry-run is read-only and does not create tags,
+releases, release PRs, or uploads. This rollout must stop before `mode=publish`;
+the live branch remains a guarded policy boundary for a future, separately
+authorized operation.
+
+Publish order, if live publication is separately authorized, is:
 
 1. `lenso-capability-organization-admin`;
 2. `lenso-capability-organization-directory`;
@@ -41,18 +56,5 @@ Run a validation-only workflow first. A live run requires `live=true`,
 4. `lenso-capability-organization-membership-admin`; and
 5. `lenso-organization-postgres-plugin`.
 
-## Local gates
-
-```sh
-cargo fmt --all -- --check
-cargo check --locked --workspace --all-targets
-cargo test --locked --workspace
-```
-
-Run PostgreSQL acceptance with `LENSO_POSTGRES_TEST_URL` and
-`--include-ignored --test-threads=1` before any package becomes public.
-
-Confirmed manual dispatch publishes every unpublished version on `main`, including
-versions prepared in a compatibility PR. It does not require the current commit
-to have been authored by release-plz. The dry-run uses the same selection policy;
-`release_always` does not bypass the workflow ref, confirmation or OIDC gates.
+Do not use `--no-verify`, a long-lived registry token, or Git dependencies as a
+publication shortcut.
