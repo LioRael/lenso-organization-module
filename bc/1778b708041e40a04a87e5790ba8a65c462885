@@ -1,0 +1,30 @@
+CONTRIBUTING.md
+  h_9d56aba080c170 4
+README.md
+  h_9d56aba080c170 5-7
+crates/lenso-capability-organization-admin/Cargo.toml
+  h_9d56aba080c170 8
+crates/lenso-capability-organization-directory/Cargo.toml
+  h_9d56aba080c170 8
+crates/lenso-capability-organization-membership-admin/Cargo.toml
+  h_9d56aba080c170 8
+crates/lenso-capability-organization-membership/Cargo.toml
+  h_9d56aba080c170 8
+crates/lenso-organization-postgres-plugin/Cargo.toml
+  h_9d56aba080c170 8
+docs/plugin-card.md
+  h_9d56aba080c170 1-3
+docs/release-process.md
+  h_9d56aba080c170 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bc1778b708041e40a04a87e5790ba8a65c462885",
+  "prompts": {},
+  "humans": {
+    "h_9d56aba080c170": {
+      "author": "LioRael <leo@lenso.dev>"
+    }
+  }
+}
