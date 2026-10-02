@@ -1,7 +1,7 @@
 # Contributing
 
 This repository is a first-party Lenso Plugin repository. Contributions must
-preserve the vNext Plugin/Capability boundaries, the PostgreSQL ownership model,
+preserve the Plugin/Capability boundaries, the PostgreSQL ownership model,
 and the Trusted Publishing rules in [the release process](docs/release-process.md).
 Do not add compatibility code for the retired v0.3.x architecture or make
 registry credentials part of a change.

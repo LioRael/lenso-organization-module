@@ -2,8 +2,9 @@
 
 Contribution and maintainer landing guidance is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-First-party Organization membership and PostgreSQL behavior for Lenso vNext. The
-default branch is vNext-only; the former `lenso-module-organization` releases
+First-party Organization membership and PostgreSQL behavior for Lenso. The
+default branch owns the current Organization Capabilities and Plugin; the former
+`lenso-module-organization` releases
 remain available through their existing crate versions and Git tags.
 
 ## Workspace

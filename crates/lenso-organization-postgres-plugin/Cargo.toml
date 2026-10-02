@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 publish = true
 repository.workspace = true
-description = "PostgreSQL-backed Organization Plugin for Lenso vNext."
+description = "PostgreSQL-backed Organization Plugin for Lenso."
 
 [dependencies]
 lenso-organization-core = { version = "0.1.0", path = "../lenso-organization-core" }

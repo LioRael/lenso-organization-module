@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 publish = true
 repository.workspace = true
-description = "Generated Organization Admin Capability contracts for Lenso vNext."
+description = "Generated Organization Admin Capability contracts for Lenso."
 
 [package.metadata.lenso.contract]
 descriptor = "capability.json"

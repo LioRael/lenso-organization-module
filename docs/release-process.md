@@ -1,7 +1,7 @@
 # Release process
 
 The former `lenso-module-organization` line ended at its existing public crate
-versions and tags. The default branch now owns vNext packages with different
+versions and tags. The default branch now owns current packages with different
 identities; it must not republish or overwrite the legacy package.
 
 The four Capability packages and the PostgreSQL Plugin are public release
